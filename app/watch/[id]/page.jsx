@@ -36,9 +36,10 @@ export default function WatchPage() {
   const [cinemaMode, setCinemaMode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [playerMode, setPlayerMode] = useState('auto'); // 'native' | 'embed' | 'auto'
-  const [shieldActive, setShieldActive] = useState(true);
+  const [resolvedStream, setResolvedStream] = useState(null);
+  const [isResolving, setIsResolving] = useState(false);
 
-  // Fetch movie data
+  // Fetch movie data & resolve stream manifest
   useEffect(() => {
     if (!id) return;
 
@@ -57,6 +58,23 @@ export default function WatchPage() {
       })
       .finally(() => {
         setLoading(false);
+      });
+
+    // Call server-side stream resolver to extract direct .m3u8 manifest (Solution 1)
+    setIsResolving(true);
+    fetch(`/api/resolve?id=${id}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.success && data.streamUrl) {
+          console.log('[WatchBox Resolver] Successfully resolved direct manifest stream:', data.streamUrl);
+          setResolvedStream(data);
+        }
+      })
+      .catch((err) => {
+        console.warn('[WatchBox Resolver] Resolution fallback:', err);
+      })
+      .finally(() => {
+        setIsResolving(false);
       });
 
     // Fetch other movies for recommendations
@@ -180,12 +198,14 @@ export default function WatchPage() {
   useEffect(() => {
     if (!movie) return;
 
+    const streamToPlay = resolvedStream?.streamUrl || movie.stream_url;
     const isDirect = Boolean(
-      movie.stream_url && (
+      resolvedStream?.streamUrl ||
+      (movie.stream_url && (
         movie.stream_url.includes('.m3u8') ||
         movie.stream_url.includes('.mp4') ||
         movie.stream_url.includes('.webm')
-      )
+      ))
     );
 
     // If using embed mode, Artplayer is not needed
@@ -203,7 +223,11 @@ export default function WatchPage() {
         playerInstanceRef.current = null;
       }
 
-      const subtitlesList = Array.isArray(movie.subtitles) ? movie.subtitles : [];
+      const rawSubs = [
+        ...(Array.isArray(movie.subtitles) ? movie.subtitles : []),
+        ...(Array.isArray(resolvedStream?.subtitles) ? resolvedStream.subtitles : [])
+      ];
+      const subtitlesList = rawSubs.filter((s, i, arr) => s.url && arr.findIndex(x => x.url === s.url) === i);
       const defaultSub = subtitlesList[activeSubIndex] || subtitlesList[0];
 
       let subtitleConfig = undefined;
@@ -226,12 +250,12 @@ export default function WatchPage() {
         };
       }
 
-      const isHls = movie.stream_url.includes('.m3u8') || movie.stream_url.includes('m3u8');
+      const isHls = streamToPlay?.includes('.m3u8') || streamToPlay?.includes('m3u8');
 
       try {
         const artOptions = {
           container: artRef.current,
-          url: movie.stream_url,
+          url: streamToPlay,
           type: isHls ? 'm3u8' : 'mp4',
           title: movie.title,
           poster: movie.backdrop_url || movie.poster_url || '',
@@ -330,7 +354,7 @@ export default function WatchPage() {
         activeArt.destroy(false);
       }
     };
-  }, [scriptsLoaded, movie, activeSubIndex, playerMode]);
+  }, [scriptsLoaded, movie, activeSubIndex, playerMode, resolvedStream]);
 
   // Change subtitle track
   function switchSubtitle(index) {
@@ -386,11 +410,12 @@ export default function WatchPage() {
   }
 
   const isDirectStream = Boolean(
-    movie?.stream_url && (
+    resolvedStream?.streamUrl ||
+    (movie?.stream_url && (
       movie.stream_url.includes('.m3u8') ||
       movie.stream_url.includes('.mp4') ||
       movie.stream_url.includes('.webm')
-    )
+    ))
   );
 
   const activeMode = playerMode === 'auto' ? (isDirectStream ? 'native' : 'embed') : playerMode;
@@ -406,7 +431,11 @@ export default function WatchPage() {
     return `https://vidlink.pro/movie/${currentTmdbId}?primaryColor=6366f1&secondaryColor=4f46e5&icons=vid`;
   };
 
-  const subtitlesList = Array.isArray(movie.subtitles) ? movie.subtitles : [];
+  const rawSubs = [
+    ...(Array.isArray(movie.subtitles) ? movie.subtitles : []),
+    ...(Array.isArray(resolvedStream?.subtitles) ? resolvedStream.subtitles : [])
+  ];
+  const subtitlesList = rawSubs.filter((s, i, arr) => s.url && arr.findIndex(x => x.url === s.url) === i);
 
   return (
     <div style={{ position: 'relative' }}>
@@ -446,7 +475,7 @@ export default function WatchPage() {
           <div className="player-controls-strip">
             {/* Player Engine Switcher */}
             <div style={{ display: 'inline-flex', background: 'rgba(255,255,255,0.06)', borderRadius: 'var(--radius-sm)', padding: 3, border: '1px solid var(--border)' }}>
-              {/* <button
+              <button
                 onClick={() => setPlayerMode('native')}
                 style={{
                   padding: '5px 12px',
@@ -457,10 +486,11 @@ export default function WatchPage() {
                   background: activeMode === 'native' ? 'var(--primary)' : 'transparent',
                   transition: '0.15s ease'
                 }}
-                title="HD Native player (Artplayer with custom subtitle sync)"
+                title="HD Native player (Pure HTML5 ArtPlayer, Zero Ads)"
+                id="btn-native-player"
               >
-                ⚡ HD Native Player
-              </button> */}
+                ⚡ HD Native Player (Zero Ads)
+              </button>
               <button
                 onClick={() => setPlayerMode('embed')}
                 style={{
@@ -472,7 +502,8 @@ export default function WatchPage() {
                   background: activeMode === 'embed' ? 'var(--primary)' : 'transparent',
                   transition: '0.15s ease'
                 }}
-                title="Source website embed player"
+                title="Web Embed Player (Multi-server fallback)"
+                id="btn-embed-player"
               >
                 🌐 Web Embed Player
               </button>
