@@ -318,18 +318,33 @@ export default function WatchPage() {
                   }
                 });
 
+                let fragFailCount = 0;
                 hls.on(HlsConstructor.Events.ERROR, function (event, data) {
                   console.warn('[WatchBox Hls Error]:', data.type, data.details, data.response?.code);
+
+                  // Detect CORS or 403/Forbidden fragment load errors from pirate CDNs
+                  if (data.details === 'fragLoadError' || data.details === 'manifestLoadError') {
+                    fragFailCount++;
+                    if (fragFailCount >= 2) {
+                      if (art && art.notice) {
+                        art.notice.show = 'Stream blocked by CDN (CORS/403). Auto-switching to Embed Server...';
+                      }
+                      setTimeout(() => {
+                        setPlayerMode('embed');
+                      }, 1500);
+                      return;
+                    }
+                  }
+
                   if (data.fatal) {
                     switch (data.type) {
                       case HlsConstructor.ErrorTypes.NETWORK_ERROR:
-                        if (data.response?.code === 403) {
-                          if (art && art.notice) {
-                            art.notice.show = 'Stream token expired or IP locked (403). Switch server if needed.';
-                          }
-                        } else {
-                          hls.startLoad();
+                        if (art && art.notice) {
+                          art.notice.show = 'Network error or expired token. Switching to Embed Server...';
                         }
+                        setTimeout(() => {
+                          setPlayerMode('embed');
+                        }, 1500);
                         break;
                       case HlsConstructor.ErrorTypes.MEDIA_ERROR:
                         hls.recoverMediaError();
