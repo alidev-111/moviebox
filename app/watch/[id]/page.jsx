@@ -70,17 +70,61 @@ export default function WatchPage() {
       .catch(() => { });
   }, [id]);
 
-  // Prevent third-party iframe from hijacking window focus
+  // In-Code uBlock-style Ad & Popup Defuser (blocks window.open, tab hijacking, and popup redirects)
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // 1. Defuse window.open (matches uBlock 'nowo' & 'prevent-window-open' scriptlets)
+    const originalOpen = window.open;
+    window.open = function (url) {
+      console.warn('[WatchBox uBlock Defuser] Blocked popup window to:', url);
+      return null;
+    };
+
+    // 2. Intercept capture-phase clicks on external ads / new tabs
+    const handleCaptureClick = (e) => {
+      let target = e.target;
+      while (target && target.tagName !== 'A') {
+        target = target.parentElement;
+      }
+      if (target && target.tagName === 'A') {
+        const isExternal = target.href && !target.href.startsWith(window.location.origin);
+        if (target.target === '_blank' || isExternal) {
+          console.warn('[WatchBox uBlock Defuser] Neutralized ad link:', target.href);
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }
+    };
+
+    // 3. Prevent popup ads from stealing window focus (Tab-Lock)
     const handleBlur = () => {
       if (document.activeElement?.tagName === 'IFRAME') {
         setTimeout(() => {
           window.focus();
-        }, 150);
+        }, 50);
       }
     };
-    window.addEventListener('blur', handleBlur);
-    return () => window.removeEventListener('blur', handleBlur);
+
+    // 4. Prevent frame-busting (stops iframe from redirecting the top-level WatchBox page)
+    const handleBeforeUnload = (e) => {
+      if (document.activeElement?.tagName === 'IFRAME') {
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+    };
+
+    window.addEventListener('click', handleCaptureClick, true);
+    window.addEventListener('blur', handleBlur, true);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.open = originalOpen;
+      window.removeEventListener('click', handleCaptureClick, true);
+      window.removeEventListener('blur', handleBlur, true);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
   }, []);
 
   const [selectedServer, setSelectedServer] = useState(1);
