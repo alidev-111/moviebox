@@ -198,7 +198,13 @@ export default function WatchPage() {
   useEffect(() => {
     if (!movie) return;
 
-    const streamToPlay = resolvedStream?.streamUrl || movie.stream_url;
+    const rawCandidate = resolvedStream?.streamUrl || movie.stream_url;
+    const isClientTokenized = rawCandidate?.includes('token=') && (rawCandidate?.includes('zealotsofzenith') || rawCandidate?.includes('ip_cidr'));
+    let streamToPlay = rawCandidate;
+    if (streamToPlay && streamToPlay.includes('.m3u8') && !streamToPlay.startsWith('/api/proxy/stream') && !isClientTokenized) {
+      streamToPlay = `/api/proxy/stream?url=${encodeURIComponent(streamToPlay)}`;
+    }
+
     const isDirect = Boolean(
       resolvedStream?.streamUrl ||
       (movie.stream_url && (
@@ -309,6 +315,29 @@ export default function WatchPage() {
                         return item.html;
                       },
                     });
+                  }
+                });
+
+                hls.on(HlsConstructor.Events.ERROR, function (event, data) {
+                  console.warn('[WatchBox Hls Error]:', data.type, data.details, data.response?.code);
+                  if (data.fatal) {
+                    switch (data.type) {
+                      case HlsConstructor.ErrorTypes.NETWORK_ERROR:
+                        if (data.response?.code === 403) {
+                          if (art && art.notice) {
+                            art.notice.show = 'Stream token expired or IP locked (403). Switch server if needed.';
+                          }
+                        } else {
+                          hls.startLoad();
+                        }
+                        break;
+                      case HlsConstructor.ErrorTypes.MEDIA_ERROR:
+                        hls.recoverMediaError();
+                        break;
+                      default:
+                        hls.destroy();
+                        break;
+                    }
                   }
                 });
 

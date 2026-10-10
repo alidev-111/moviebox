@@ -31,15 +31,19 @@ export async function GET(request) {
     // If the movie has a direct .m3u8 or .mp4 stream registered in database
     if (movie?.stream_url && (movie.stream_url.includes('.m3u8') || movie.stream_url.includes('.mp4') || movie.stream_url.includes('.webm'))) {
       const isHls = movie.stream_url.includes('.m3u8');
-      const proxiedUrl = isHls
+      // Streams with client IP-locked tokens (e.g. zealotsofzenith) cannot be routed through Vercel cloud proxy
+      // because the upstream CDN rejects cloud datacenter IPs with 403 not-in-range.
+      const isClientTokenized = movie.stream_url.includes('token=') && (movie.stream_url.includes('zealotsofzenith') || movie.stream_url.includes('ip_cidr'));
+      const streamUrlToServe = (isHls && !isClientTokenized)
         ? `/api/proxy/stream?url=${encodeURIComponent(movie.stream_url)}`
         : movie.stream_url;
 
       return NextResponse.json({
         success: true,
-        source: 'database-direct',
-        streamUrl: proxiedUrl,
+        source: isClientTokenized ? 'direct-client' : 'database-direct',
+        streamUrl: streamUrlToServe,
         rawStreamUrl: movie.stream_url,
+        isClientTokenized,
         type: isHls ? 'hls' : 'mp4',
         title: movie.title,
         subtitles: movie.subtitles || [],

@@ -84,6 +84,13 @@ export async function GET(request) {
       if (val) responseHeaders.set(h, val);
     });
 
+    // Upstream CDNs often disguise MPEG-TS chunks with .html extension and text/html header
+    // Force correct video/mp2t so HLS.js demuxers process the segments immediately
+    const currentCt = responseHeaders.get('content-type') || '';
+    if (currentCt.includes('text/html') || targetUrl.includes('/content/') || targetUrl.includes('.html')) {
+      responseHeaders.set('content-type', 'video/mp2t');
+    }
+
     return new Response(upstreamRes.body, {
       status: upstreamRes.status,
       headers: responseHeaders,
