@@ -527,7 +527,6 @@ export default function WatchPage() {
           ) : (
             <iframe
               src={getEmbedUrl()}
-              sandbox={selectedServer === 1 ? 'allow-scripts allow-same-origin allow-forms allow-presentation' : undefined}
               style={{ width: '100%', height: '100%', border: 'none', background: '#000' }}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
               allowFullScreen
