@@ -36,6 +36,7 @@ export default function WatchPage() {
   const [cinemaMode, setCinemaMode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [playerMode, setPlayerMode] = useState('auto'); // 'native' | 'embed' | 'auto'
+  const [shieldActive, setShieldActive] = useState(true);
 
   // Fetch movie data
   useEffect(() => {
@@ -308,9 +309,9 @@ export default function WatchPage() {
 
   const getEmbedUrl = () => {
     if (!currentTmdbId) return movie?.stream_url;
-    if (selectedServer === 1) return `https://vidsrc.to/embed/movie/${currentTmdbId}`;
-    if (selectedServer === 2) return `https://autoembed.co/movie/tmdb/${currentTmdbId}`;
-    if (selectedServer === 3) return `https://multiembed.mov/?video_id=${currentTmdbId}&tmdb=1`;
+    if (selectedServer === 1) return `https://autoembed.co/movie/tmdb/${currentTmdbId}`;
+    if (selectedServer === 2) return `https://multiembed.mov/?video_id=${currentTmdbId}&tmdb=1`;
+    if (selectedServer === 3) return `https://vidsrc.to/embed/movie/${currentTmdbId}`;
     if (selectedServer === 4) return `https://vidsrc.me/embed/movie?tmdb=${currentTmdbId}`;
     return movie?.stream_url;
   };
@@ -410,21 +411,21 @@ export default function WatchPage() {
               className={`sub-pill ${selectedServer === 1 ? 'active' : ''}`}
               id="server-btn-1"
             >
-              ⚡ Server 1 (VidSrc HD)
+              ⚡ Server 1 (AutoEmbed • Fast & Clean)
             </button>
             <button
               onClick={() => setSelectedServer(2)}
               className={`sub-pill ${selectedServer === 2 ? 'active' : ''}`}
               id="server-btn-2"
             >
-              🌐 Server 2 (AutoEmbed)
+              🌐 Server 2 (MultiEmbed)
             </button>
             <button
               onClick={() => setSelectedServer(3)}
               className={`sub-pill ${selectedServer === 3 ? 'active' : ''}`}
               id="server-btn-3"
             >
-              🚀 Server 3 (MultiEmbed)
+              🚀 Server 3 (VidSrc HD)
             </button>
             <button
               onClick={() => setSelectedServer(4)}
@@ -437,19 +438,54 @@ export default function WatchPage() {
         )}
 
         {/* Video Player Box */}
-        <div className="player-wrapper" id="player-wrapper">
+        <div className="player-wrapper" id="player-wrapper" style={{ position: 'relative' }}>
           {activeMode === 'native' ? (
             <div ref={artRef} className="player-container" id="artplayer-container" />
           ) : (
-            <iframe
-              src={getEmbedUrl()}
-              style={{ width: '100%', height: '100%', border: 'none', background: '#000' }}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-              allowFullScreen
-              referrerPolicy="no-referrer-when-downgrade"
-              title={movie.title}
-              id="embed-player-iframe"
-            />
+            <>
+              {shieldActive && (
+                <div
+                  onClick={() => setShieldActive(false)}
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    zIndex: 20,
+                    background: 'rgba(7, 9, 14, 0.45)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    backdropFilter: 'blur(3px)',
+                  }}
+                  id="click-shield-overlay"
+                >
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '14px 28px',
+                    borderRadius: '40px',
+                    background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                    color: '#fff',
+                    fontWeight: 700,
+                    fontSize: '1rem',
+                    boxShadow: '0 8px 30px rgba(99, 102, 241, 0.5)',
+                  }}>
+                    <Play size={22} fill="#fff" />
+                    <span>Click to Start Stream</span>
+                  </div>
+                </div>
+              )}
+              <iframe
+                src={getEmbedUrl()}
+                style={{ width: '100%', height: '100%', border: 'none', background: '#000' }}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+                allowFullScreen
+                referrerPolicy="no-referrer-when-downgrade"
+                title={movie.title}
+                id="embed-player-iframe"
+              />
+            </>
           )}
         </div>
 
