@@ -383,16 +383,6 @@ export default function WatchPage() {
               <Moon size={15} color={cinemaMode ? '#a5b4fc' : 'currentColor'} />
               <span>{cinemaMode ? 'Lights On' : 'Cinema Mode'}</span>
             </button>
-
-            {/* <button
-              onClick={handleShare}
-              className="btn-secondary"
-              title="Copy share link"
-              id="share-link-button"
-            >
-              {copiedLink ? <CheckCircle2 size={15} color="#10b981" /> : <Share2 size={15} />}
-              <span>{copiedLink ? 'Link Copied!' : 'Share'}</span>
-            </button> */}
           </div>
         </div>
 
@@ -444,6 +434,7 @@ export default function WatchPage() {
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
               allowFullScreen
               referrerPolicy="no-referrer"
+              sandbox="allow-scripts allow-same-origin allow-forms"
               title={movie.title}
               id="embed-player-iframe"
             />
