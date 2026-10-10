@@ -309,8 +309,8 @@ export default function WatchPage() {
 
   const getEmbedUrl = () => {
     if (!currentTmdbId) return movie?.stream_url;
-    if (selectedServer === 2) return `https://vidsrc.me/embed/movie?tmdb=${currentTmdbId}`;
-    return `https://vidsrc.to/embed/movie/${currentTmdbId}`;
+    if (selectedServer === 2) return `https://vidsrc.to/embed/movie/${currentTmdbId}`;
+    return `/api/proxy/vidsrc?tmdb=${currentTmdbId}`;
   };
 
   const subtitlesList = Array.isArray(movie.subtitles) ? movie.subtitles : [];
@@ -408,14 +408,14 @@ export default function WatchPage() {
               className={`sub-pill ${selectedServer === 1 ? 'active' : ''}`}
               id="server-btn-1"
             >
-              ⚡ VidSrc Server 1 (HD)
+              ⚡ VidSrc Clean (Ad-Shielded • No Popups)
             </button>
             <button
               onClick={() => setSelectedServer(2)}
               className={`sub-pill ${selectedServer === 2 ? 'active' : ''}`}
               id="server-btn-2"
             >
-              🚀 VidSrc Server 2 (Backup)
+              🚀 VidSrc Direct Mirror
             </button>
           </div>
         )}
