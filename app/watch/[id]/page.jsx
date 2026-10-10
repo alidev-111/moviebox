@@ -145,15 +145,7 @@ export default function WatchPage() {
       return origAddEventListener.call(this, type, listener, options);
     };
 
-    // 4. Focus lock & frame-busting prevention
-    const handleBlur = () => {
-      if (document.activeElement?.tagName === 'IFRAME') {
-        setTimeout(() => {
-          window.focus();
-        }, 50);
-      }
-    };
-
+    // 4. Frame-busting prevention
     const handleBeforeUnload = (e) => {
       if (document.activeElement?.tagName === 'IFRAME') {
         e.preventDefault();
@@ -163,7 +155,6 @@ export default function WatchPage() {
     };
 
     window.addEventListener('click', handleCaptureClick, true);
-    window.addEventListener('blur', handleBlur, true);
     window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
@@ -179,7 +170,6 @@ export default function WatchPage() {
       HTMLAnchorElement.prototype.click = origAnchorClick;
       EventTarget.prototype.addEventListener = origAddEventListener;
       window.removeEventListener('click', handleCaptureClick, true);
-      window.removeEventListener('blur', handleBlur, true);
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, []);
@@ -535,50 +525,16 @@ export default function WatchPage() {
           {activeMode === 'native' ? (
             <div ref={artRef} className="player-container" id="artplayer-container" />
           ) : (
-            <>
-              {shieldActive && (
-                <div
-                  onClick={() => setShieldActive(false)}
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    zIndex: 20,
-                    background: 'rgba(7, 9, 14, 0.45)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    backdropFilter: 'blur(3px)',
-                  }}
-                  id="click-shield-overlay"
-                >
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    padding: '14px 28px',
-                    borderRadius: '40px',
-                    background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
-                    color: '#fff',
-                    fontWeight: 700,
-                    fontSize: '1rem',
-                    boxShadow: '0 8px 30px rgba(99, 102, 241, 0.5)',
-                  }}>
-                    <Play size={22} fill="#fff" />
-                    <span>Click to Start Stream</span>
-                  </div>
-                </div>
-              )}
-              <iframe
-                src={getEmbedUrl()}
-                style={{ width: '100%', height: '100%', border: 'none', background: '#000' }}
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-                allowFullScreen
-                referrerPolicy="no-referrer-when-downgrade"
-                title={movie.title}
-                id="embed-player-iframe"
-              />
-            </>
+            <iframe
+              src={getEmbedUrl()}
+              sandbox={selectedServer === 1 ? 'allow-scripts allow-same-origin allow-forms allow-presentation' : undefined}
+              style={{ width: '100%', height: '100%', border: 'none', background: '#000' }}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+              allowFullScreen
+              referrerPolicy="no-referrer-when-downgrade"
+              title={movie.title}
+              id="embed-player-iframe"
+            />
           )}
         </div>
 
