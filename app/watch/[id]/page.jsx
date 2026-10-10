@@ -310,7 +310,8 @@ export default function WatchPage() {
   const getEmbedUrl = () => {
     if (!currentTmdbId) return movie?.stream_url;
     if (selectedServer === 2) return `https://vidsrc.to/embed/movie/${currentTmdbId}`;
-    return `/api/proxy/vidsrc?tmdb=${currentTmdbId}`;
+    if (selectedServer === 3) return `https://vidsrc.me/embed/movie?tmdb=${currentTmdbId}`;
+    return `https://vsembed.ru/embed/movie/${currentTmdbId}/`;
   };
 
   const subtitlesList = Array.isArray(movie.subtitles) ? movie.subtitles : [];
@@ -397,7 +398,7 @@ export default function WatchPage() {
           </div>
         </div>
 
-        {/* Server Switcher (VidSrc Only) */}
+        {/* Server Switcher (VidSrc Direct Core) */}
         {activeMode === 'embed' && currentTmdbId && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
@@ -408,14 +409,14 @@ export default function WatchPage() {
               className={`sub-pill ${selectedServer === 1 ? 'active' : ''}`}
               id="server-btn-1"
             >
-              ⚡ VidSrc Clean (Ad-Shielded • No Popups)
+              ⚡ VidSrc Server 1 (Core • Fast)
             </button>
             <button
               onClick={() => setSelectedServer(2)}
               className={`sub-pill ${selectedServer === 2 ? 'active' : ''}`}
               id="server-btn-2"
             >
-              🚀 VidSrc Direct Mirror
+              🚀 VidSrc Server 2 (Mirror)
             </button>
           </div>
         )}
