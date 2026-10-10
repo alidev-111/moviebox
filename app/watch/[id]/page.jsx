@@ -69,6 +69,19 @@ export default function WatchPage() {
       .catch(() => { });
   }, [id]);
 
+  // Prevent third-party iframe from hijacking window focus
+  useEffect(() => {
+    const handleBlur = () => {
+      if (document.activeElement?.tagName === 'IFRAME') {
+        setTimeout(() => {
+          window.focus();
+        }, 150);
+      }
+    };
+    window.addEventListener('blur', handleBlur);
+    return () => window.removeEventListener('blur', handleBlur);
+  }, []);
+
   const [selectedServer, setSelectedServer] = useState(1);
 
   // Initialize or re-initialize player
@@ -433,8 +446,7 @@ export default function WatchPage() {
               style={{ width: '100%', height: '100%', border: 'none', background: '#000' }}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
               allowFullScreen
-              referrerPolicy="no-referrer"
-              sandbox="allow-scripts allow-same-origin allow-forms"
+              referrerPolicy="no-referrer-when-downgrade"
               title={movie.title}
               id="embed-player-iframe"
             />
