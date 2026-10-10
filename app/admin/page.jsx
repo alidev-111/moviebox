@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import {
   Shield,
@@ -24,7 +24,8 @@ import {
   HelpCircle,
   Lock,
   LogOut,
-  ArrowLeft
+  ArrowLeft,
+  Upload
 } from 'lucide-react';
 
 export default function AdminPage() {
@@ -65,11 +66,51 @@ export default function AdminPage() {
   const [testStreamUrl, setTestStreamUrl] = useState('');
   const [copiedSql, setCopiedSql] = useState(false);
 
-  // Auto Extractor State
-  const [importUrl, setImportUrl] = useState('');
-  const [importLoading, setImportLoading] = useState(false);
-  const [importStatus, setImportStatus] = useState('');
-  const [showF12Guide, setShowF12Guide] = useState(false);
+  // Direct Storage Upload State
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState('');
+  const videoInputRef = useRef(null);
+  const subInputRef = useRef(null);
+  const [subUploadIndex, setSubUploadIndex] = useState(null);
+
+  async function handleFileUpload(file, folder = 'videos', targetIndex = null) {
+    if (!file) return;
+    setUploadLoading(true);
+    const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+    setUploadStatus(`Uploading ${file.name} (${sizeMb} MB) to Supabase Storage...`);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('folder', folder);
+
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminKey}`,
+        },
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success && data.publicUrl) {
+        if (folder === 'videos') {
+          setStreamUrl(data.publicUrl);
+          setUploadStatus(`✅ Video uploaded successfully! Public link: ${data.publicUrl}`);
+        } else if (folder === 'subtitles' && targetIndex !== null) {
+          const updated = [...subtitles];
+          updated[targetIndex].url = data.publicUrl;
+          setSubtitles(updated);
+          setUploadStatus(`✅ Subtitle uploaded and linked: ${data.fileName}`);
+        }
+      } else {
+        setUploadStatus(`❌ Upload failed: ${data.error || 'Server error'}`);
+      }
+    } catch (err) {
+      setUploadStatus(`❌ Upload error: ${err.message}`);
+    } finally {
+      setUploadLoading(false);
+    }
+  }
 
   async function handleAutoExtract() {
     if (!importUrl || !importUrl.trim()) return;
@@ -972,31 +1013,75 @@ create policy "Allow service role full access"
 
               {/* Stream URL */}
               <div className="form-group-full">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
                   <label className="input-label" style={{ margin: 0 }}>
                     Stream URL (.m3u8 HLS or .mp4 direct link) *
                   </label>
-                  {streamUrl && (
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <input
+                      type="file"
+                      ref={videoInputRef}
+                      style={{ display: 'none' }}
+                      accept="video/mp4,video/webm,video/x-matroska"
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) handleFileUpload(e.target.files[0], 'videos');
+                      }}
+                    />
                     <button
                       type="button"
-                      onClick={() => setTestStreamUrl(streamUrl)}
-                      style={{ fontSize: '0.78rem', color: 'var(--primary)', fontWeight: 600 }}
+                      onClick={() => videoInputRef.current?.click()}
+                      disabled={uploadLoading}
+                      style={{
+                        fontSize: '0.78rem',
+                        background: 'rgba(99, 102, 241, 0.15)',
+                        color: '#a5b4fc',
+                        border: '1px solid rgba(99, 102, 241, 0.4)',
+                        padding: '4px 10px',
+                        borderRadius: 6,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        cursor: 'pointer'
+                      }}
                     >
-                      Test Play Link &rarr;
+                      {uploadLoading ? <RefreshCw size={13} className="spin" /> : <Upload size={13} />}
+                      <span>{uploadLoading ? 'Uploading...' : '☁️ Upload MP4 to Supabase'}</span>
                     </button>
-                  )}
+                    {streamUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setTestStreamUrl(streamUrl)}
+                        style={{ fontSize: '0.78rem', color: 'var(--primary)', fontWeight: 600 }}
+                      >
+                        Test Play Link &rarr;
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <input
                   type="url"
                   className="form-input"
-                  placeholder="https://example.com/stream/index.m3u8 or https://.../movie.mp4"
+                  placeholder="https://.../movie.mp4 or Supabase Storage link"
                   value={streamUrl}
                   onChange={(e) => setStreamUrl(e.target.value)}
                   required
                   id="form-stream-url"
                 />
+                {uploadStatus && (
+                  <div style={{
+                    marginTop: 8,
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    fontSize: '0.8rem',
+                    background: uploadStatus.startsWith('✅') ? 'rgba(16, 185, 129, 0.2)' : 'rgba(99, 102, 241, 0.2)',
+                    color: uploadStatus.startsWith('✅') ? '#86efac' : '#c7d2fe',
+                    border: '1px solid rgba(255,255,255,0.1)'
+                  }}>
+                    {uploadStatus}
+                  </div>
+                )}
                 <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                  Direct viewer playback. Vercel only serves this metadata so your serverless limits and bandwidth stay at zero.
+                  Direct viewer playback. Upload an MP4 to your connected Supabase Storage for 100% ad-free, 1080p native streaming with zero expiration!
                 </p>
 
                 {/* Inline Video Tester */}
@@ -1034,6 +1119,18 @@ create policy "Allow service role full access"
                   </button>
                 </div>
 
+                <input
+                  type="file"
+                  ref={subInputRef}
+                  style={{ display: 'none' }}
+                  accept=".vtt,.srt"
+                  onChange={(e) => {
+                    if (e.target.files?.[0] && subUploadIndex !== null) {
+                      handleFileUpload(e.target.files[0], 'subtitles', subUploadIndex);
+                    }
+                  }}
+                />
+
                 <div className="subtitle-manager">
                   {subtitles.map((sub, index) => (
                     <div key={index} className="sub-item-row">
@@ -1041,18 +1138,41 @@ create policy "Allow service role full access"
                         type="text"
                         placeholder="Language (e.g. English, Español)"
                         className="form-input"
-                        style={{ width: 180 }}
+                        style={{ width: 160 }}
                         value={sub.name}
                         onChange={(e) => updateSubtitleField(index, 'name', e.target.value)}
                       />
                       <input
                         type="url"
-                        placeholder="Subtitle URL (.vtt / .srt or /subtitles/sample.vtt)"
+                        placeholder="Subtitle URL (.vtt / .srt or Supabase link)"
                         className="form-input"
                         style={{ flex: 1 }}
                         value={sub.url}
                         onChange={(e) => updateSubtitleField(index, 'url', e.target.value)}
                       />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSubUploadIndex(index);
+                          subInputRef.current?.click();
+                        }}
+                        style={{
+                          fontSize: '0.75rem',
+                          padding: '6px 10px',
+                          borderRadius: 6,
+                          background: 'rgba(255,255,255,0.06)',
+                          color: '#38bdf8',
+                          border: '1px solid rgba(56, 189, 248, 0.3)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4
+                        }}
+                        title="Upload .vtt or .srt file to Supabase"
+                      >
+                        <Upload size={13} />
+                        <span>Upload</span>
+                      </button>
                       <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                         <input
                           type="checkbox"
