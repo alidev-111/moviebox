@@ -208,8 +208,8 @@ export default function WatchPage() {
       ))
     );
 
-    // If using embed mode, Artplayer is not needed
-    if (!isDirect && playerMode !== 'native') return;
+    // If there is no direct .m3u8 or video file, Artplayer cannot play webpage URLs
+    if (!isDirect) return;
 
     if (!artRef.current) return;
 
@@ -475,22 +475,24 @@ export default function WatchPage() {
           <div className="player-controls-strip">
             {/* Player Engine Switcher */}
             <div style={{ display: 'inline-flex', background: 'rgba(255,255,255,0.06)', borderRadius: 'var(--radius-sm)', padding: 3, border: '1px solid var(--border)' }}>
-              <button
-                onClick={() => setPlayerMode('native')}
-                style={{
-                  padding: '5px 12px',
-                  borderRadius: 6,
-                  fontSize: '0.78rem',
-                  fontWeight: 600,
-                  color: activeMode === 'native' ? '#fff' : 'var(--text-secondary)',
-                  background: activeMode === 'native' ? 'var(--primary)' : 'transparent',
-                  transition: '0.15s ease'
-                }}
-                title="HD Native player (Pure HTML5 ArtPlayer, Zero Ads)"
-                id="btn-native-player"
-              >
-                ⚡ HD Native Player (Zero Ads)
-              </button>
+              {isDirectStream && (
+                <button
+                  onClick={() => setPlayerMode('native')}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: 6,
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    color: activeMode === 'native' ? '#fff' : 'var(--text-secondary)',
+                    background: activeMode === 'native' ? 'var(--primary)' : 'transparent',
+                    transition: '0.15s ease'
+                  }}
+                  title="HD Native player (Pure HTML5 ArtPlayer, Zero Ads)"
+                  id="btn-native-player"
+                >
+                  ⚡ HD Native Player (Zero Ads)
+                </button>
+              )}
               <button
                 onClick={() => setPlayerMode('embed')}
                 style={{
@@ -498,8 +500,8 @@ export default function WatchPage() {
                   borderRadius: 6,
                   fontSize: '0.78rem',
                   fontWeight: 600,
-                  color: activeMode === 'embed' ? '#fff' : 'var(--text-secondary)',
-                  background: activeMode === 'embed' ? 'var(--primary)' : 'transparent',
+                  color: (activeMode === 'embed' || !isDirectStream) ? '#fff' : 'var(--text-secondary)',
+                  background: (activeMode === 'embed' || !isDirectStream) ? 'var(--primary)' : 'transparent',
                   transition: '0.15s ease'
                 }}
                 title="Web Embed Player (Multi-server fallback)"
@@ -553,7 +555,7 @@ export default function WatchPage() {
 
         {/* Video Player Box */}
         <div className="player-wrapper" id="player-wrapper" style={{ position: 'relative' }}>
-          {activeMode === 'native' ? (
+          {activeMode === 'native' && isDirectStream ? (
             <div ref={artRef} className="player-container" id="artplayer-container" />
           ) : (
             <iframe
