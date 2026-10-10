@@ -295,9 +295,10 @@ export default function WatchPage() {
 
   const getEmbedUrl = () => {
     if (!currentTmdbId) return movie?.stream_url;
-    if (selectedServer === 1) return `https://vidup.to/movie/${currentTmdbId}`;
+    if (selectedServer === 1) return `https://vidsrc.to/embed/movie/${currentTmdbId}`;
     if (selectedServer === 2) return `https://autoembed.co/movie/tmdb/${currentTmdbId}`;
-    if (selectedServer === 3) return `https://vixsrc.to/movie/${currentTmdbId}`;
+    if (selectedServer === 3) return `https://multiembed.mov/?video_id=${currentTmdbId}&tmdb=1`;
+    if (selectedServer === 4) return `https://vidsrc.me/embed/movie?tmdb=${currentTmdbId}`;
     return movie?.stream_url;
   };
 
@@ -406,7 +407,7 @@ export default function WatchPage() {
               className={`sub-pill ${selectedServer === 1 ? 'active' : ''}`}
               id="server-btn-1"
             >
-              ⚡ Server 1 (VidUp HD • Built-in Subtitles)
+              ⚡ Server 1 (VidSrc HD)
             </button>
             <button
               onClick={() => setSelectedServer(2)}
@@ -420,7 +421,14 @@ export default function WatchPage() {
               className={`sub-pill ${selectedServer === 3 ? 'active' : ''}`}
               id="server-btn-3"
             >
-              🚀 Server 3 (VixCloud)
+              🚀 Server 3 (MultiEmbed)
+            </button>
+            <button
+              onClick={() => setSelectedServer(4)}
+              className={`sub-pill ${selectedServer === 4 ? 'active' : ''}`}
+              id="server-btn-4"
+            >
+              🌟 Server 4 (VidSrc VIP)
             </button>
           </div>
         )}
@@ -435,7 +443,7 @@ export default function WatchPage() {
               style={{ width: '100%', height: '100%', border: 'none', background: '#000' }}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
               allowFullScreen
-              referrerPolicy="origin"
+              referrerPolicy="no-referrer"
               title={movie.title}
               id="embed-player-iframe"
             />
