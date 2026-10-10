@@ -70,34 +70,82 @@ export default function WatchPage() {
       .catch(() => { });
   }, [id]);
 
-  // In-Code uBlock-style Ad & Popup Defuser (blocks window.open, tab hijacking, and popup redirects)
+  // In-Code uBlock Origin Scriptlet Suite (https://github.com/gorhill/uBlock)
+  // Implements: 'prevent-window-open' (nowo), 'disable-newtab-links', 'addEventListener-defuser' (aeld), & 'prevent-navigation'
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    // 1. Defuse window.open (matches uBlock 'nowo' & 'prevent-window-open' scriptlets)
+    // 1. uBlock Origin 'prevent-window-open' (nowo)
+    // Non-configurable lock on window.open to prevent scripts from restoring it
     const originalOpen = window.open;
-    window.open = function (url) {
-      console.warn('[WatchBox uBlock Defuser] Blocked popup window to:', url);
+    const blockOpen = function (url) {
+      console.warn('[uBlock Defuser: prevent-window-open] Blocked window.open to:', url);
       return null;
     };
 
-    // 2. Intercept capture-phase clicks on external ads / new tabs
+    try {
+      Object.defineProperty(window, 'open', {
+        value: blockOpen,
+        writable: false,
+        configurable: true,
+      });
+    } catch {
+      window.open = blockOpen;
+    }
+
+    try {
+      if (window.Window && window.Window.prototype) {
+        Object.defineProperty(window.Window.prototype, 'open', {
+          value: blockOpen,
+          writable: false,
+          configurable: true,
+        });
+      }
+    } catch { }
+
+    // 2. uBlock Origin 'disable-newtab-links'
+    // Neutralizes programmatic anchor clicks with target="_blank"
+    const origAnchorClick = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      const isExternal = this.href && !this.href.startsWith(window.location.origin) && !this.href.startsWith('javascript:');
+      if (this.target === '_blank' || isExternal) {
+        console.warn('[uBlock Defuser: disable-newtab-links] Neutralized anchor.click() to:', this.href);
+        return;
+      }
+      return origAnchorClick.apply(this, arguments);
+    };
+
+    // Neutralizes user clicks on external/new-tab anchors in capture phase
     const handleCaptureClick = (e) => {
       let target = e.target;
       while (target && target.tagName !== 'A') {
         target = target.parentElement;
       }
       if (target && target.tagName === 'A') {
-        const isExternal = target.href && !target.href.startsWith(window.location.origin);
+        const isExternal = target.href && !target.href.startsWith(window.location.origin) && !target.href.startsWith('javascript:');
         if (target.target === '_blank' || isExternal) {
-          console.warn('[WatchBox uBlock Defuser] Neutralized ad link:', target.href);
+          console.warn('[uBlock Defuser: disable-newtab-links] Blocked new tab link click:', target.href);
           e.preventDefault();
           e.stopPropagation();
         }
       }
     };
 
-    // 3. Prevent popup ads from stealing window focus (Tab-Lock)
+    // 3. uBlock Origin 'addEventListener-defuser' (aeld)
+    // Defuses malicious popup/popunder listeners
+    const origAddEventListener = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function (type, listener, options) {
+      if (['click', 'mousedown', 'mouseup', 'pointerdown', 'touchstart'].includes(type) && typeof listener === 'function') {
+        const fnStr = listener.toString();
+        if (/(popunder|popads|window\.open|llvpn|adcash|histats|onclick_ad)/i.test(fnStr)) {
+          console.warn('[uBlock Defuser: aeld] Defused ad listener for event:', type);
+          return;
+        }
+      }
+      return origAddEventListener.call(this, type, listener, options);
+    };
+
+    // 4. Focus lock & frame-busting prevention
     const handleBlur = () => {
       if (document.activeElement?.tagName === 'IFRAME') {
         setTimeout(() => {
@@ -106,7 +154,6 @@ export default function WatchPage() {
       }
     };
 
-    // 4. Prevent frame-busting (stops iframe from redirecting the top-level WatchBox page)
     const handleBeforeUnload = (e) => {
       if (document.activeElement?.tagName === 'IFRAME') {
         e.preventDefault();
@@ -120,7 +167,17 @@ export default function WatchPage() {
     window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
-      window.open = originalOpen;
+      try {
+        Object.defineProperty(window, 'open', {
+          value: originalOpen,
+          writable: true,
+          configurable: true,
+        });
+      } catch {
+        window.open = originalOpen;
+      }
+      HTMLAnchorElement.prototype.click = origAnchorClick;
+      EventTarget.prototype.addEventListener = origAddEventListener;
       window.removeEventListener('click', handleCaptureClick, true);
       window.removeEventListener('blur', handleBlur, true);
       window.removeEventListener('beforeunload', handleBeforeUnload);
@@ -353,9 +410,10 @@ export default function WatchPage() {
 
   const getEmbedUrl = () => {
     if (!currentTmdbId) return movie?.stream_url;
+    if (selectedServer === 1) return `https://vidlink.pro/movie/${currentTmdbId}?primaryColor=6366f1&secondaryColor=4f46e5&icons=vid`;
     if (selectedServer === 2) return `https://vidsrc.to/embed/movie/${currentTmdbId}`;
-    if (selectedServer === 3) return `https://vidsrc.me/embed/movie?tmdb=${currentTmdbId}`;
-    return `https://vsembed.ru/embed/movie/${currentTmdbId}/`;
+    if (selectedServer === 3) return `https://multiembed.mov/?video_id=${currentTmdbId}&tmdb=1`;
+    return `https://vidlink.pro/movie/${currentTmdbId}?primaryColor=6366f1&secondaryColor=4f46e5&icons=vid`;
   };
 
   const subtitlesList = Array.isArray(movie.subtitles) ? movie.subtitles : [];
@@ -442,25 +500,32 @@ export default function WatchPage() {
           </div>
         </div>
 
-        {/* Server Switcher (VidSrc Direct Core) */}
+        {/* Server Switcher */}
         {activeMode === 'embed' && currentTmdbId && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-              VidSrc Stream:
+              Stream Server:
             </span>
             <button
               onClick={() => setSelectedServer(1)}
               className={`sub-pill ${selectedServer === 1 ? 'active' : ''}`}
               id="server-btn-1"
             >
-              ⚡ VidSrc Server 1 (Core • Fast)
+              ✨ Server 1 (VidLink • Ad-Free)
             </button>
             <button
               onClick={() => setSelectedServer(2)}
               className={`sub-pill ${selectedServer === 2 ? 'active' : ''}`}
               id="server-btn-2"
             >
-              🚀 VidSrc Server 2 (Mirror)
+              ⚡ Server 2 (VidSrc Mirror)
+            </button>
+            <button
+              onClick={() => setSelectedServer(3)}
+              className={`sub-pill ${selectedServer === 3 ? 'active' : ''}`}
+              id="server-btn-3"
+            >
+              🚀 Server 3 (MultiEmbed)
             </button>
           </div>
         )}
