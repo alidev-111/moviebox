@@ -309,11 +309,8 @@ export default function WatchPage() {
 
   const getEmbedUrl = () => {
     if (!currentTmdbId) return movie?.stream_url;
-    if (selectedServer === 1) return `https://autoembed.co/movie/tmdb/${currentTmdbId}`;
-    if (selectedServer === 2) return `https://multiembed.mov/?video_id=${currentTmdbId}&tmdb=1`;
-    if (selectedServer === 3) return `https://vidsrc.to/embed/movie/${currentTmdbId}`;
-    if (selectedServer === 4) return `https://vidsrc.me/embed/movie?tmdb=${currentTmdbId}`;
-    return movie?.stream_url;
+    if (selectedServer === 2) return `https://vidsrc.me/embed/movie?tmdb=${currentTmdbId}`;
+    return `https://vidsrc.to/embed/movie/${currentTmdbId}`;
   };
 
   const subtitlesList = Array.isArray(movie.subtitles) ? movie.subtitles : [];
@@ -400,39 +397,25 @@ export default function WatchPage() {
           </div>
         </div>
 
-        {/* Server Switcher (For Embed Streams) */}
+        {/* Server Switcher (VidSrc Only) */}
         {activeMode === 'embed' && currentTmdbId && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-              Playback Server:
+              VidSrc Stream:
             </span>
             <button
               onClick={() => setSelectedServer(1)}
               className={`sub-pill ${selectedServer === 1 ? 'active' : ''}`}
               id="server-btn-1"
             >
-              ⚡ Server 1 (AutoEmbed • Fast & Clean)
+              ⚡ VidSrc Server 1 (HD)
             </button>
             <button
               onClick={() => setSelectedServer(2)}
               className={`sub-pill ${selectedServer === 2 ? 'active' : ''}`}
               id="server-btn-2"
             >
-              🌐 Server 2 (MultiEmbed)
-            </button>
-            <button
-              onClick={() => setSelectedServer(3)}
-              className={`sub-pill ${selectedServer === 3 ? 'active' : ''}`}
-              id="server-btn-3"
-            >
-              🚀 Server 3 (VidSrc HD)
-            </button>
-            <button
-              onClick={() => setSelectedServer(4)}
-              className={`sub-pill ${selectedServer === 4 ? 'active' : ''}`}
-              id="server-btn-4"
-            >
-              🌟 Server 4 (VidSrc VIP)
+              🚀 VidSrc Server 2 (Backup)
             </button>
           </div>
         )}
