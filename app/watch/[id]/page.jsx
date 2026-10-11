@@ -1123,6 +1123,7 @@ export default function WatchPage() {
               style={{ width: '100%', height: '100%', border: 'none', background: '#000' }}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
               allowFullScreen
+              referrerPolicy="strict-origin-when-cross-origin"
               title={movie.title}
               id="youtube-cinema-player"
             />

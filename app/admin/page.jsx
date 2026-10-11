@@ -1552,6 +1552,7 @@ create policy "Allow service role full access"
                           style={{ width: '100%', height: '100%', border: 'none' }}
                           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
                           allowFullScreen
+                          referrerPolicy="strict-origin-when-cross-origin"
                           title="Preview"
                         />
                       </div>
