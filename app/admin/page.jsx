@@ -28,6 +28,15 @@ import {
   Upload
 } from 'lucide-react';
 
+function getYouTubeId(url) {
+  if (!url || typeof url !== 'string') return null;
+  const trimmed = url.trim();
+  const match = trimmed.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|shorts\/|live\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+  if (match) return match[1];
+  if (/^[\w-]{11}$/.test(trimmed)) return trimmed;
+  return null;
+}
+
 export default function AdminPage() {
   const [adminKey, setAdminKey] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -72,8 +81,9 @@ export default function AdminPage() {
   const [importStatus, setImportStatus] = useState('');
   const [showF12Guide, setShowF12Guide] = useState(false);
 
-  // Direct Storage Upload & Google Drive State
-  const [sourceMode, setSourceMode] = useState('upload'); // 'upload' | 'gdrive' | 'link'
+  // Direct Storage Upload, YouTube & Google Drive State
+  const [sourceMode, setSourceMode] = useState('youtube'); // 'youtube' | 'upload' | 'gdrive' | 'link'
+  const [youtubeInputUrl, setYoutubeInputUrl] = useState('');
   const [gdriveInputUrl, setGdriveInputUrl] = useState('');
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
@@ -97,6 +107,17 @@ export default function AdminPage() {
     if (lower.includes('_ru') || lower.includes('.ru.') || lower.includes('-ru') || lower.includes('rus')) return 'Русский';
     if (lower.includes('_ja') || lower.includes('.ja.') || lower.includes('-ja') || lower.includes('jpn')) return '日本語 (Japanese)';
     return filename.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9 ]/g, ' ').trim() || 'Custom Subtitles';
+  }
+
+  function handleConnectYouTube() {
+    if (!youtubeInputUrl.trim()) return;
+    const parsedId = getYouTubeId(youtubeInputUrl);
+    if (parsedId) {
+      setStreamUrl(`https://www.youtube.com/watch?v=${parsedId}`);
+      setStatusMessage({ text: `Connected Ad-Free YouTube Cinema Stream (ID: ${parsedId})! Zero quota limits and instant 1080p playback ready.`, type: 'success' });
+    } else {
+      setStatusMessage({ text: 'Could not detect a valid YouTube Video ID or URL. Please paste the full YouTube link or 11-digit Video ID.', type: 'error' });
+    }
   }
 
   function handleConnectGDrive() {
@@ -361,7 +382,8 @@ export default function AdminPage() {
     setIsFeatured(false);
     setSubtitles([{ name: 'English (CC)', url: '', isDefault: true }]);
     setTestStreamUrl('');
-    setSourceMode('upload');
+    setSourceMode('youtube');
+    setYoutubeInputUrl('');
     setUploadStatus('');
     setGdriveInputUrl('');
     setImportUrl('');
@@ -375,6 +397,7 @@ export default function AdminPage() {
     setId(movie.id);
     setTitle(movie.title || '');
     setStreamUrl(movie.stream_url || '');
+    const ytId = getYouTubeId(movie.stream_url);
     const isGDrive = Boolean(
       movie.stream_url && (
         movie.stream_url.includes('drive.google.com') ||
@@ -388,7 +411,10 @@ export default function AdminPage() {
         movie.stream_url.endsWith('.webm')
       )
     );
-    if (isGDrive) {
+    if (ytId) {
+      setSourceMode('youtube');
+      setYoutubeInputUrl(movie.stream_url);
+    } else if (isGDrive) {
       setSourceMode('gdrive');
       setGdriveInputUrl(movie.stream_url);
     } else if (isDirectStorage) {
@@ -482,6 +508,12 @@ export default function AdminPage() {
     if (!quickEditMovie) return;
 
     setStatusMessage({ text: 'Updating stream link...', type: 'info' });
+    let finalUrl = quickStreamUrl.trim();
+    const ytId = getYouTubeId(finalUrl);
+    if (ytId) {
+      finalUrl = `https://www.youtube.com/watch?v=${ytId}`;
+    }
+
     try {
       const res = await fetch(`/api/movies/${quickEditMovie.id}`, {
         method: 'PUT',
@@ -490,7 +522,7 @@ export default function AdminPage() {
           Authorization: `Bearer ${adminKey}`,
         },
         body: JSON.stringify({
-          stream_url: quickStreamUrl.trim(),
+          stream_url: finalUrl,
         }),
       });
 
@@ -1132,6 +1164,26 @@ create policy "Allow service role full access"
                   <div style={{ display: 'flex', gap: 8, background: 'rgba(0,0,0,0.3)', padding: 4, borderRadius: 8, border: '1px solid var(--border)', flexWrap: 'wrap' }}>
                     <button
                       type="button"
+                      onClick={() => setSourceMode('youtube')}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: 6,
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        background: sourceMode === 'youtube' ? '#ef4444' : 'transparent',
+                        color: sourceMode === 'youtube' ? '#fff' : 'var(--text-secondary)',
+                        border: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        cursor: 'pointer',
+                        transition: '0.15s ease'
+                      }}
+                    >
+                      <Play size={14} /> ▶️ YouTube (Unlisted • Zero Ads)
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setSourceMode('upload')}
                       style={{
                         padding: '6px 14px',
@@ -1203,8 +1255,90 @@ create policy "Allow service role full access"
                   }}
                 />
 
-                {/* MODE 1: Direct Storage Upload */}
-                {sourceMode === 'upload' ? (
+                {/* MODE 1: YouTube Unlisted Video (Zero Ads Cinema) */}
+                {sourceMode === 'youtube' ? (
+                  <div>
+                    {streamUrl && getYouTubeId(streamUrl) ? (
+                      <div style={{
+                        background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(153, 27, 27, 0.2))',
+                        border: '1px solid rgba(239, 68, 68, 0.35)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '18px 20px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#fca5a5', fontSize: '0.98rem' }}>
+                              <CheckCircle2 size={19} color="#ef4444" />
+                              <span>Active Ad-Free YouTube Cinema Stream Connected</span>
+                            </div>
+                            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                              Video ID: <strong style={{ color: '#fff' }}>{getYouTubeId(streamUrl)}</strong> • Ultra-fast Google CDN, zero bandwidth limits, 100% ad-free playback.
+                            </p>
+                          </div>
+                          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => setTestStreamUrl(streamUrl)}
+                              className="nav-btn nav-btn-ghost"
+                              style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+                            >
+                              <Play size={14} /> Preview Stream
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setStreamUrl(''); setYoutubeInputUrl(''); }}
+                              className="nav-btn nav-btn-ghost"
+                              style={{ fontSize: '0.8rem', padding: '6px 12px', color: '#f87171' }}
+                            >
+                              <Trash2 size={14} /> Disconnect
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{
+                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '24px 20px',
+                        background: 'rgba(239, 68, 68, 0.05)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                          <Play size={22} color="#ef4444" />
+                          <div style={{ fontWeight: 700, color: '#fff', fontSize: '1rem' }}>
+                            Connect YouTube Video (Unlisted • 100% Ad-Free)
+                          </div>
+                        </div>
+                        <div style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.6 }}>
+                          <div style={{ marginBottom: 4 }}>
+                            💡 <strong>Zero Ads Guarantee:</strong> Upload your movie to YouTube and set visibility to <strong>Unlisted</strong> with monetization off.
+                          </div>
+                          <div>
+                            YouTube unlisted videos never show advertisements, have unlimited Google CDN streaming speed, and never hit Google Drive's "too many users" quota limit.
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 10 }}>
+                          <input
+                            type="text"
+                            className="form-input"
+                            placeholder="Paste YouTube link (https://youtu.be/... or https://youtube.com/watch?v=...) or Video ID"
+                            value={youtubeInputUrl}
+                            onChange={(e) => setYoutubeInputUrl(e.target.value)}
+                            style={{ flex: 1 }}
+                          />
+                          <button
+                            type="button"
+                            onClick={handleConnectYouTube}
+                            className="nav-btn nav-btn-primary"
+                            style={{ whiteSpace: 'nowrap', padding: '0 20px', background: '#ef4444', borderColor: '#dc2626' }}
+                          >
+                            Connect Video
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : sourceMode === 'upload' ? (
+                  /* MODE 2: Direct Storage Upload */
                   <div>
                     {streamUrl && (streamUrl.includes('supabase.co') || streamUrl.endsWith('.mp4') || streamUrl.endsWith('.webm')) ? (
                       <div style={{
@@ -1294,7 +1428,7 @@ create policy "Allow service role full access"
                     )}
                   </div>
                 ) : sourceMode === 'gdrive' ? (
-                  /* MODE 2: Google Drive 5TB Account */
+                  /* MODE 3: Google Drive 5TB Account */
                   <div>
                     {streamUrl && (streamUrl.includes('gdrive') || streamUrl.includes('drive.google.com')) ? (
                       <div style={{
@@ -1372,7 +1506,7 @@ create policy "Allow service role full access"
                     )}
                   </div>
                 ) : (
-                  /* MODE 3: External Stream / Embed Link */
+                  /* MODE 4: External Stream / Embed Link */
                   <div>
                     <input
                       type="url"
@@ -1404,17 +1538,31 @@ create policy "Allow service role full access"
                 {testStreamUrl && (
                   <div className="stream-tester-box" style={{ marginTop: 14 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Previewing Video File:</span>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>
+                        {getYouTubeId(testStreamUrl) ? 'Previewing Ad-Free YouTube Cinema Stream:' : 'Previewing Video File:'}
+                      </span>
                       <button type="button" onClick={() => setTestStreamUrl('')} style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
                         Close Preview
                       </button>
                     </div>
-                    <video
-                      src={testStreamUrl}
-                      controls
-                      autoPlay
-                      className="stream-tester-video"
-                    />
+                    {getYouTubeId(testStreamUrl) ? (
+                      <div style={{ position: 'relative', width: '100%', aspectRatio: '16/9', borderRadius: 8, overflow: 'hidden', background: '#000' }}>
+                        <iframe
+                          src={`https://www.youtube-nocookie.com/embed/${getYouTubeId(testStreamUrl)}?autoplay=1&rel=0&modestbranding=1&iv_load_policy=3&playsinline=1&fs=1&controls=1&color=white`}
+                          style={{ width: '100%', height: '100%', border: 'none' }}
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+                          allowFullScreen
+                          title="Preview"
+                        />
+                      </div>
+                    ) : (
+                      <video
+                        src={testStreamUrl}
+                        controls
+                        autoPlay
+                        className="stream-tester-video"
+                      />
+                    )}
                   </div>
                 )}
               </div>
@@ -1744,11 +1892,11 @@ ADMIN_SECRET_KEY=admin123`}
 
             <form onSubmit={handleQuickStreamSave} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
-                <label className="input-label">New Working Stream URL (.m3u8 or .mp4)</label>
+                <label className="input-label">New Working Stream (YouTube Link / Video ID, MP4, or Google Drive)</label>
                 <input
-                  type="url"
+                  type="text"
                   className="form-input"
-                  placeholder="https://..."
+                  placeholder="e.g. YouTube link (https://youtu.be/...), 11-digit Video ID, or .mp4 URL"
                   value={quickStreamUrl}
                   onChange={(e) => setQuickStreamUrl(e.target.value)}
                   required

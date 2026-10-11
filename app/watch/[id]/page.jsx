@@ -24,6 +24,15 @@ import {
 } from 'lucide-react';
 import { cleanSubtitleVtt } from '@/lib/subtitles';
 
+export function getYouTubeId(url) {
+  if (!url || typeof url !== 'string') return null;
+  const trimmed = url.trim();
+  const match = trimmed.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|shorts\/|live\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+  if (match) return match[1];
+  if (/^[\w-]{11}$/.test(trimmed)) return trimmed;
+  return null;
+}
+
 export default function WatchPage() {
   const params = useParams();
   const router = useRouter();
@@ -114,9 +123,10 @@ export default function WatchPage() {
         setMovie(data);
         setError('');
 
-        // If the movie has a direct file (Google Drive or Supabase Storage), we DO NOT need the pirate resolver
+        // If the movie has a direct file (YouTube, Google Drive, or Supabase Storage), we DO NOT need the pirate resolver
         const hasDirectFile = Boolean(
           data?.stream_url && (
+            getYouTubeId(data.stream_url) ||
             data.stream_url.includes('drive.google.com') ||
             data.stream_url.includes('/api/stream/gdrive') ||
             data.stream_url.includes('supabase.co') ||
@@ -267,6 +277,16 @@ export default function WatchPage() {
   // Initialize or re-initialize player
   useEffect(() => {
     if (!movie) return;
+
+    // YouTube Unlisted streams are rendered natively via the cinema YouTube embed iframe
+    const ytId = getYouTubeId(resolvedStream?.streamUrl || movie.stream_url);
+    if (ytId) {
+      if (playerInstanceRef.current && playerInstanceRef.current.destroy) {
+        playerInstanceRef.current.destroy(false);
+        playerInstanceRef.current = null;
+      }
+      return;
+    }
 
     const rawCandidate = resolvedStream?.streamUrl || movie.stream_url;
     let streamToPlay = rawCandidate;
@@ -731,14 +751,17 @@ export default function WatchPage() {
     );
   }
 
+  const youtubeId = getYouTubeId(movie?.stream_url);
+
   const isDirectStorage = Boolean(
-    movie?.stream_url && (
+    youtubeId ||
+    (movie?.stream_url && (
       movie.stream_url.includes('drive.google.com') ||
       movie.stream_url.includes('/api/stream/gdrive') ||
       movie.stream_url.includes('supabase.co') ||
       movie.stream_url.endsWith('.mp4') ||
       movie.stream_url.endsWith('.webm')
-    )
+    ))
   );
 
   const isDirectStream = Boolean(
@@ -751,8 +774,10 @@ export default function WatchPage() {
     ))
   );
 
-  // If a direct storage/Google Drive video is available, ALWAYS lock to HD Native Player!
-  const activeMode = isDirectStorage ? 'native' : (playerMode === 'auto' ? (isDirectStream ? 'native' : 'embed') : playerMode);
+  // If a direct storage, YouTube, or Google Drive video is available, ALWAYS lock to cinema mode!
+  const activeMode = isDirectStorage
+    ? (youtubeId ? 'youtube' : 'native')
+    : (playerMode === 'auto' ? (isDirectStream ? 'native' : 'embed') : playerMode);
 
   const tmdbMatch = movie?.stream_url?.match(/\/(movie|tv)\/(\d+)/) || movie?.stream_url?.match(/tmdb=(\d+)/);
   const currentTmdbId = tmdbMatch ? tmdbMatch[2] : (movie?.id?.includes('spider-man') ? '969681' : null);
@@ -998,16 +1023,16 @@ export default function WatchPage() {
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 7,
-                background: 'rgba(16, 185, 129, 0.15)',
-                border: '1px solid rgba(16, 185, 129, 0.35)',
+                background: youtubeId ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                border: youtubeId ? '1px solid rgba(239, 68, 68, 0.35)' : '1px solid rgba(16, 185, 129, 0.35)',
                 borderRadius: 'var(--radius-sm)',
                 padding: '6px 14px',
                 fontSize: '0.82rem',
                 fontWeight: 700,
-                color: '#86efac'
+                color: youtubeId ? '#fca5a5' : '#86efac'
               }}>
-                <CheckCircle2 size={15} color="#10b981" />
-                <span>⚡ 1080p Ad-Free Cinema Stream (Zero Ads)</span>
+                <CheckCircle2 size={15} color={youtubeId ? '#ef4444' : '#10b981'} />
+                <span>{youtubeId ? '⚡ 1080p Ad-Free YouTube Cinema Stream (Zero Ads)' : '⚡ 1080p Ad-Free Cinema Stream (Zero Ads)'}</span>
               </div>
             ) : (
               <div style={{ display: 'inline-flex', background: 'rgba(255,255,255,0.06)', borderRadius: 'var(--radius-sm)', padding: 3, border: '1px solid var(--border)' }}>
@@ -1092,7 +1117,16 @@ export default function WatchPage() {
 
         {/* Video Player Box */}
         <div className="player-wrapper" id="player-wrapper" style={{ position: 'relative' }}>
-          {activeMode === 'native' && isDirectStream ? (
+          {youtubeId ? (
+            <iframe
+              src={`https://www.youtube-nocookie.com/embed/${youtubeId}?autoplay=1&rel=0&modestbranding=1&iv_load_policy=3&playsinline=1&fs=1&controls=1&color=white`}
+              style={{ width: '100%', height: '100%', border: 'none', background: '#000' }}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+              allowFullScreen
+              title={movie.title}
+              id="youtube-cinema-player"
+            />
+          ) : activeMode === 'native' && isDirectStream ? (
             <div ref={artRef} className="player-container" id="artplayer-container" />
           ) : (
             <iframe
