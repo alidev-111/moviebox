@@ -79,9 +79,25 @@ export default function AdminPage() {
   const [uploadStatus, setUploadStatus] = useState('');
   const videoInputRef = useRef(null);
   const subInputRef = useRef(null);
+  const subUploadTargetRef = useRef(null);
   const [subUploadIndex, setSubUploadIndex] = useState(null);
   const [subSearchId, setSubSearchId] = useState('');
   const [subSearching, setSubSearching] = useState(false);
+
+  function detectSubLanguage(filename) {
+    const lower = filename.toLowerCase();
+    if (lower.includes('_en') || lower.includes('.en.') || lower.includes('-en') || lower.includes('eng')) return 'English';
+    if (lower.includes('_es') || lower.includes('.es.') || lower.includes('-es') || lower.includes('spa')) return 'Español';
+    if (lower.includes('_fr') || lower.includes('.fr.') || lower.includes('-fr') || lower.includes('fre')) return 'Français';
+    if (lower.includes('_de') || lower.includes('.de.') || lower.includes('-de') || lower.includes('ger')) return 'Deutsch';
+    if (lower.includes('_hi') || lower.includes('.hi.') || lower.includes('-hi') || lower.includes('hin')) return 'हिन्दी (Hindi)';
+    if (lower.includes('_ar') || lower.includes('.ar.') || lower.includes('-ar') || lower.includes('ara')) return 'العربية (Arabic)';
+    if (lower.includes('_it') || lower.includes('.it.') || lower.includes('-it') || lower.includes('ita')) return 'Italiano';
+    if (lower.includes('_pt') || lower.includes('.pt.') || lower.includes('-pt') || lower.includes('por')) return 'Português';
+    if (lower.includes('_ru') || lower.includes('.ru.') || lower.includes('-ru') || lower.includes('rus')) return 'Русский';
+    if (lower.includes('_ja') || lower.includes('.ja.') || lower.includes('-ja') || lower.includes('jpn')) return '日本語 (Japanese)';
+    return filename.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9 ]/g, ' ').trim() || 'Custom Subtitles';
+  }
 
   function handleConnectGDrive() {
     if (!gdriveInputUrl.trim()) return;
@@ -139,11 +155,35 @@ export default function AdminPage() {
         if (folder === 'videos') {
           setStreamUrl(data.publicUrl);
           setUploadStatus(`✅ Video uploaded successfully! Public link: ${data.publicUrl}`);
-        } else if (folder === 'subtitles' && targetIndex !== null) {
-          const updated = [...subtitles];
-          updated[targetIndex].url = data.publicUrl;
-          setSubtitles(updated);
-          setUploadStatus(`✅ Subtitle uploaded and linked: ${data.fileName}`);
+        } else if (folder === 'subtitles') {
+          const detectedLang = detectSubLanguage(file.name);
+          setSubtitles((prev) => {
+            const updated = [...prev];
+            if (targetIndex !== null && updated[targetIndex]) {
+              updated[targetIndex] = {
+                ...updated[targetIndex],
+                url: data.publicUrl,
+                name: updated[targetIndex].name && updated[targetIndex].name !== 'English (CC)' ? updated[targetIndex].name : detectedLang,
+              };
+            } else {
+              const emptyIdx = updated.findIndex((s) => !s.url || !s.url.trim());
+              if (emptyIdx !== -1) {
+                updated[emptyIdx] = {
+                  name: detectedLang,
+                  url: data.publicUrl,
+                  isDefault: emptyIdx === 0,
+                };
+              } else {
+                updated.push({
+                  name: detectedLang,
+                  url: data.publicUrl,
+                  isDefault: updated.length === 0,
+                });
+              }
+            }
+            return updated;
+          });
+          setUploadStatus(`✅ Subtitle "${file.name}" uploaded, converted to WebVTT, and added!`);
         }
       } else {
         setUploadStatus(`❌ Upload failed: ${data.error || 'Server error'}`);
@@ -1390,7 +1430,20 @@ create policy "Allow service role full access"
                       Supports WebVTT (.vtt) & SubRip (.srt). Automatically converted and CORS-enabled.
                     </span>
                   </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        subUploadTargetRef.current = null;
+                        subInputRef.current?.click();
+                      }}
+                      disabled={uploadLoading}
+                      className="nav-btn nav-btn-primary"
+                      style={{ fontSize: '0.78rem', padding: '6px 14px', background: '#0284c7' }}
+                    >
+                      <Upload size={13} />
+                      <span>☁️ Upload Subtitle (.SRT / .VTT)</span>
+                    </button>
                     <button
                       type="button"
                       onClick={handleFetchSubtitles}
@@ -1399,7 +1452,7 @@ create policy "Allow service role full access"
                       style={{ fontSize: '0.78rem', padding: '6px 14px' }}
                     >
                       {subSearching ? <RefreshCw size={13} className="spin" /> : <Wand2 size={13} />}
-                      <span>{subSearching ? 'Fetching Subs...' : '🌐 Auto-Fetch Subtitles (Wyzie / OpenSubs)'}</span>
+                      <span>{subSearching ? 'Fetching Subs...' : '🌐 Auto-Fetch Online Subs'}</span>
                     </button>
                     <button
                       type="button"
@@ -1407,7 +1460,7 @@ create policy "Allow service role full access"
                       className="btn-add-sub"
                       id="add-subtitle-track-btn"
                     >
-                      <Plus size={14} /> Add Manual Language
+                      <Plus size={14} /> Add Row
                     </button>
                   </div>
                 </div>
@@ -1416,10 +1469,14 @@ create policy "Allow service role full access"
                   type="file"
                   ref={subInputRef}
                   style={{ display: 'none' }}
-                  accept=".vtt,.srt"
+                  accept=".vtt,.srt,.sub,.txt,text/vtt,application/x-subrip,text/plain"
                   onChange={(e) => {
-                    if (e.target.files?.[0] && subUploadIndex !== null) {
-                      handleFileUpload(e.target.files[0], 'subtitles', subUploadIndex);
+                    const pickedFile = e.target.files?.[0];
+                    if (pickedFile) {
+                      const targetIdx = subUploadTargetRef.current;
+                      handleFileUpload(pickedFile, 'subtitles', targetIdx);
+                      e.target.value = '';
+                      subUploadTargetRef.current = null;
                     }
                   }}
                 />
@@ -1446,7 +1503,7 @@ create policy "Allow service role full access"
                       <button
                         type="button"
                         onClick={() => {
-                          setSubUploadIndex(index);
+                          subUploadTargetRef.current = index;
                           subInputRef.current?.click();
                         }}
                         style={{
