@@ -66,6 +66,12 @@ export default function AdminPage() {
   const [testStreamUrl, setTestStreamUrl] = useState('');
   const [copiedSql, setCopiedSql] = useState(false);
 
+  // Smart Link Importer & Guide State
+  const [importUrl, setImportUrl] = useState('');
+  const [importLoading, setImportLoading] = useState(false);
+  const [importStatus, setImportStatus] = useState('');
+  const [showF12Guide, setShowF12Guide] = useState(false);
+
   // Direct Storage Upload & Google Drive State
   const [sourceMode, setSourceMode] = useState('upload'); // 'upload' | 'gdrive' | 'link'
   const [gdriveInputUrl, setGdriveInputUrl] = useState('');
@@ -317,6 +323,9 @@ export default function AdminPage() {
     setTestStreamUrl('');
     setSourceMode('upload');
     setUploadStatus('');
+    setGdriveInputUrl('');
+    setImportUrl('');
+    setImportStatus('');
     setSubSearchId('');
   }
 
