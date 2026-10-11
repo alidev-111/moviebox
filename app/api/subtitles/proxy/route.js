@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server';
 
 function convertSrtToVtt(srtContent) {
-  let vtt = 'WEBVTT\n\n';
-  // Normalize line breaks
-  const normalized = srtContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  // Replace timecode comma with period
-  const converted = normalized.replace(
-    /(\d{2}:\d{2}:\d{2}),(\d{3})/g,
-    '$1.$2'
-  );
-  return vtt + converted;
+  // International WebVTT converter with numeric counter stripping and comma-to-period timestamp normalization
+  let cleaned = srtContent
+    .replace(/\r+/g, '')
+    .replace(/^\d+\n(?=\d{2}:\d{2}:\d{2})/gm, '')
+    .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+
+  if (!cleaned.startsWith('WEBVTT')) {
+    cleaned = 'WEBVTT\n\n' + cleaned;
+  }
+  return cleaned;
 }
 
 export async function GET(request) {

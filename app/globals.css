@@ -689,6 +689,108 @@ input, textarea, select {
   color: #c7d2fe;
 }
 
+.sub-settings-trigger {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.sub-settings-trigger:hover {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+/* Subtitle Settings Modal */
+.sub-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.sub-modal-card {
+  width: 100%;
+  max-width: 580px;
+  background: #111827;
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.85);
+  padding: 24px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.sub-preview-screen {
+  width: 100%;
+  height: 120px;
+  background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 100%);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+
+.sub-setting-row {
+  margin-bottom: 18px;
+}
+
+.sub-setting-title {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sub-options-grid {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sub-opt-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: 0.15s ease;
+}
+.sub-opt-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.sub-opt-btn.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.4);
+}
+
 /* Movie Details under Player */
 .movie-details-box {
   margin-top: 24px;

@@ -16,7 +16,11 @@ import {
   CheckCircle2,
   Share2,
   Film,
-  Play
+  Play,
+  Settings,
+  X,
+  Sliders,
+  Check
 } from 'lucide-react';
 
 export default function WatchPage() {
@@ -38,6 +42,57 @@ export default function WatchPage() {
   const [playerMode, setPlayerMode] = useState('auto'); // 'native' | 'embed' | 'auto'
   const [resolvedStream, setResolvedStream] = useState(null);
   const [isResolving, setIsResolving] = useState(false);
+
+  // Subtitle Appearance Customization State (Adhering to Netflix & BBC International Standards)
+  const [subSettings, setSubSettings] = useState({
+    fontSize: '22px', // '16px' | '22px' | '28px' | '34px'
+    color: '#ffffff', // '#ffffff' | '#ffe600' | '#38bdf8' | '#4ade80'
+    bg: 'shadow',     // 'shadow' | 'box' | 'solid'
+    position: '45px', // '45px' | '75px' | 'top'
+  });
+  const [showSubSettings, setShowSubSettings] = useState(false);
+
+  // Load saved subtitle preferences from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('watchbox_sub_settings');
+      if (saved) {
+        setSubSettings((prev) => ({ ...prev, ...JSON.parse(saved) }));
+      }
+    } catch { }
+  }, []);
+
+  function applySubStyle(newValues) {
+    const updated = { ...subSettings, ...newValues };
+    setSubSettings(updated);
+    try {
+      localStorage.setItem('watchbox_sub_settings', JSON.stringify(updated));
+    } catch { }
+
+    if (playerInstanceRef.current && playerInstanceRef.current.subtitle) {
+      const artSub = playerInstanceRef.current.subtitle;
+      if (typeof artSub.style === 'function') {
+        if (updated.fontSize) artSub.style('fontSize', updated.fontSize);
+        if (updated.color) artSub.style('color', updated.color);
+        if (updated.position) artSub.style('bottom', updated.position === 'top' ? 'calc(100% - 90px)' : updated.position);
+        if (updated.bg === 'shadow') {
+          artSub.style('textShadow', '0 2px 6px rgba(0,0,0,0.95), 0 0 10px rgba(0,0,0,0.85)');
+          artSub.style('backgroundColor', 'transparent');
+          artSub.style('padding', '0');
+        } else if (updated.bg === 'box') {
+          artSub.style('textShadow', 'none');
+          artSub.style('backgroundColor', 'rgba(0,0,0,0.65)');
+          artSub.style('padding', '4px 10px');
+          artSub.style('borderRadius', '6px');
+        } else if (updated.bg === 'solid') {
+          artSub.style('textShadow', 'none');
+          artSub.style('backgroundColor', 'rgba(0,0,0,0.95)');
+          artSub.style('padding', '4px 10px');
+          artSub.style('borderRadius', '6px');
+        }
+      }
+    }
+  }
 
   // Fetch movie data & resolve stream manifest
   useEffect(() => {
@@ -199,8 +254,17 @@ export default function WatchPage() {
     if (!movie) return;
 
     const rawCandidate = resolvedStream?.streamUrl || movie.stream_url;
-    const isClientTokenized = rawCandidate?.includes('token=') && (rawCandidate?.includes('zealotsofzenith') || rawCandidate?.includes('ip_cidr'));
     let streamToPlay = rawCandidate;
+
+    // Direct Google Drive 5TB stream handling
+    if (streamToPlay && (streamToPlay.includes('drive.google.com') || streamToPlay.startsWith('/api/stream/gdrive'))) {
+      const gdriveMatch = streamToPlay.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || streamToPlay.match(/id=([a-zA-Z0-9_-]+)/);
+      if (gdriveMatch && !streamToPlay.startsWith('/api/stream/gdrive')) {
+        streamToPlay = `/api/stream/gdrive?id=${gdriveMatch[1]}`;
+      }
+    }
+
+    const isClientTokenized = rawCandidate?.includes('token=') && (rawCandidate?.includes('zealotsofzenith') || rawCandidate?.includes('ip_cidr'));
     if (streamToPlay && streamToPlay.includes('.m3u8') && !streamToPlay.startsWith('/api/proxy/stream') && !isClientTokenized) {
       streamToPlay = `/api/proxy/stream?url=${encodeURIComponent(streamToPlay)}`;
     }
@@ -210,7 +274,10 @@ export default function WatchPage() {
       (movie.stream_url && (
         movie.stream_url.includes('.m3u8') ||
         movie.stream_url.includes('.mp4') ||
-        movie.stream_url.includes('.webm')
+        movie.stream_url.includes('.webm') ||
+        movie.stream_url.includes('drive.google.com') ||
+        movie.stream_url.includes('/api/stream/gdrive') ||
+        movie.stream_url.includes('supabase.co')
       ))
     );
 
@@ -247,10 +314,20 @@ export default function WatchPage() {
           url: finalSubUrl,
           type: defaultSub.url.toLowerCase().endsWith('.srt') ? 'srt' : 'vtt',
           style: {
-            color: '#ffffff',
-            fontSize: '22px',
-            textShadow: '0 2px 6px rgba(0,0,0,0.95), 0 0 10px rgba(0,0,0,0.8)',
+            color: subSettings.color,
+            fontSize: subSettings.fontSize,
+            textShadow: subSettings.bg === 'shadow'
+              ? '0 2px 6px rgba(0,0,0,0.95), 0 0 10px rgba(0,0,0,0.85)'
+              : 'none',
+            backgroundColor: subSettings.bg === 'box'
+              ? 'rgba(0,0,0,0.65)'
+              : subSettings.bg === 'solid'
+              ? 'rgba(0,0,0,0.95)'
+              : 'transparent',
+            padding: subSettings.bg !== 'shadow' ? '4px 10px' : '0',
+            borderRadius: subSettings.bg !== 'shadow' ? '6px' : '0',
             fontWeight: '600',
+            bottom: subSettings.position === 'top' ? 'calc(100% - 90px)' : subSettings.position,
           },
           encoding: 'utf-8',
         };
@@ -458,7 +535,10 @@ export default function WatchPage() {
     (movie?.stream_url && (
       movie.stream_url.includes('.m3u8') ||
       movie.stream_url.includes('.mp4') ||
-      movie.stream_url.includes('.webm')
+      movie.stream_url.includes('.webm') ||
+      movie.stream_url.includes('drive.google.com') ||
+      movie.stream_url.includes('/api/stream/gdrive') ||
+      movie.stream_url.includes('supabase.co')
     ))
   );
 
@@ -468,6 +548,12 @@ export default function WatchPage() {
   const currentTmdbId = tmdbMatch ? tmdbMatch[2] : (movie?.id?.includes('spider-man') ? '969681' : null);
 
   const getEmbedUrl = () => {
+    if (movie?.stream_url && (movie.stream_url.includes('drive.google.com') || movie.stream_url.includes('/api/stream/gdrive'))) {
+      const gdriveMatch = movie.stream_url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || movie.stream_url.match(/id=([a-zA-Z0-9_-]+)/);
+      if (gdriveMatch) {
+        return `https://drive.google.com/file/d/${gdriveMatch[1]}/preview`;
+      }
+    }
     if (!currentTmdbId) return movie?.stream_url;
     if (selectedServer === 1) return `https://vidlink.pro/movie/${currentTmdbId}?primaryColor=6366f1&secondaryColor=4f46e5&icons=vid`;
     if (selectedServer === 2) return `https://vidsrc.to/embed/movie/${currentTmdbId}`;
@@ -506,6 +592,157 @@ export default function WatchPage() {
             pointerEvents: 'none',
           }}
         />
+      )}
+
+      {/* In-Player Subtitle Settings Modal (International Standards & Customization) */}
+      {showSubSettings && (
+        <div className="sub-modal-backdrop" onClick={() => setShowSubSettings(false)}>
+          <div className="sub-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Sliders size={20} color="#818cf8" />
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0, color: '#fff' }}>
+                  Subtitle Settings & Appearance
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowSubSettings(false)}
+                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 4 }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Interactive Cinema Screen Live Preview */}
+            <div className="sub-preview-screen">
+              <div style={{
+                position: 'absolute',
+                bottom: subSettings.position === 'top' ? 'auto' : (subSettings.position === '75px' ? '28px' : '14px'),
+                top: subSettings.position === 'top' ? '14px' : 'auto',
+                fontSize: subSettings.fontSize,
+                color: subSettings.color,
+                fontWeight: 600,
+                textAlign: 'center',
+                textShadow: subSettings.bg === 'shadow' ? '0 2px 6px rgba(0,0,0,0.95), 0 0 10px rgba(0,0,0,0.85)' : 'none',
+                backgroundColor: subSettings.bg === 'box' ? 'rgba(0,0,0,0.65)' : subSettings.bg === 'solid' ? 'rgba(0,0,0,0.95)' : 'transparent',
+                padding: subSettings.bg !== 'shadow' ? '4px 12px' : '0',
+                borderRadius: subSettings.bg !== 'shadow' ? '6px' : '0',
+                maxWidth: '90%',
+                lineHeight: 1.35,
+                transition: '0.15s ease',
+              }}>
+                WatchBox Cinema • Sample Subtitle (Netflix Std)
+              </div>
+            </div>
+
+            {/* Font Size Option */}
+            <div className="sub-setting-row">
+              <div className="sub-setting-title">
+                <span>Font Size (International Standard: 22px / ~3.8% height)</span>
+                <span style={{ color: '#818cf8' }}>{subSettings.fontSize}</span>
+              </div>
+              <div className="sub-options-grid">
+                {[
+                  { label: 'Small (16px)', val: '16px' },
+                  { label: 'Standard (22px)', val: '22px' },
+                  { label: 'Large (28px)', val: '28px' },
+                  { label: 'Extra Large (34px)', val: '34px' },
+                ].map((item) => (
+                  <button
+                    key={item.val}
+                    className={`sub-opt-btn ${subSettings.fontSize === item.val ? 'active' : ''}`}
+                    onClick={() => applySubStyle({ fontSize: item.val })}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Font Color Option */}
+            <div className="sub-setting-row">
+              <div className="sub-setting-title">
+                <span>Color (High-Contrast Guidelines)</span>
+                <span style={{ color: subSettings.color }}>● Selected</span>
+              </div>
+              <div className="sub-options-grid">
+                {[
+                  { label: 'Pure White (Netflix Std)', val: '#ffffff' },
+                  { label: 'Cinema Yellow', val: '#ffe600' },
+                  { label: 'Ice Cyan', val: '#38bdf8' },
+                  { label: 'Mint Green', val: '#4ade80' },
+                ].map((item) => (
+                  <button
+                    key={item.val}
+                    className={`sub-opt-btn ${subSettings.color === item.val ? 'active' : ''}`}
+                    onClick={() => applySubStyle({ color: item.val })}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Background / Contrast Box Option */}
+            <div className="sub-setting-row">
+              <div className="sub-setting-title">
+                <span>Contrast & Background Style</span>
+              </div>
+              <div className="sub-options-grid">
+                {[
+                  { label: 'Drop Shadow Only (Netflix)', val: 'shadow' },
+                  { label: 'Translucent Box (BBC)', val: 'box' },
+                  { label: 'Solid Black Box (FCC)', val: 'solid' },
+                ].map((item) => (
+                  <button
+                    key={item.val}
+                    className={`sub-opt-btn ${subSettings.bg === item.val ? 'active' : ''}`}
+                    onClick={() => applySubStyle({ bg: item.val })}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Position Option */}
+            <div className="sub-setting-row">
+              <div className="sub-setting-title">
+                <span>Vertical Screen Placement</span>
+              </div>
+              <div className="sub-options-grid">
+                {[
+                  { label: 'Bottom Safe Area (Standard)', val: '45px' },
+                  { label: 'Raised Above Controls (75px)', val: '75px' },
+                  { label: 'Top of Screen', val: 'top' },
+                ].map((item) => (
+                  <button
+                    key={item.val}
+                    className={`sub-opt-btn ${subSettings.position === item.val ? 'active' : ''}`}
+                    onClick={() => applySubStyle({ position: item.val })}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Standards Compliance Note */}
+            <div style={{
+              marginTop: 18,
+              padding: '12px 14px',
+              borderRadius: 8,
+              background: 'rgba(99, 102, 241, 0.1)',
+              border: '1px solid rgba(99, 102, 241, 0.25)',
+              fontSize: '0.78rem',
+              color: '#c7d2fe',
+              lineHeight: 1.5,
+            }}>
+              💡 <strong>International Guidelines (Netflix Timed Text & BBC Standards):</strong><br />
+              Subtitles use proportional sans-serif font, maximum 2 lines per cue, 37–42 characters per line, with title-safe margins to prevent overlap with scrubber controls.
+            </div>
+          </div>
+        </div>
       )}
 
       <div className="watch-container" style={{ position: 'relative', zIndex: cinemaMode ? 95 : 1 }}>
@@ -614,29 +851,8 @@ export default function WatchPage() {
           )}
         </div>
 
-        {/* Auto-Subtitles Banner (When using Embed Engine)
-        {activeMode === 'embed' && (
-          <div style={{
-            marginTop: 16,
-            padding: '12px 18px',
-            borderRadius: 'var(--radius-md)',
-            background: 'rgba(16, 185, 129, 0.12)',
-            border: '1px solid rgba(16, 185, 129, 0.3)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            fontSize: '0.88rem',
-            color: '#86efac'
-          }} id="embed-subtitles-banner">
-            <Subtitles size={18} color="#34d399" />
-            <span>
-              <strong>Subtitles are automatically loaded inside the video:</strong> Click the <strong>[CC]</strong> button on the bottom-right of the player (next to the settings gear) to switch languages (English, Spanish, etc.)!
-            </span>
-          </div>
-        )} */}
-
         {/* Subtitles Track Switcher Bar (For Native Direct Streams) */}
-        {activeMode === 'native' && subtitlesList.filter(s => s.url).length > 0 && (
+        {activeMode === 'native' && (
           <div className="subtitles-pill-bar" id="subtitles-track-selector">
             <div className="subtitles-pill-label">
               <Subtitles size={17} color="#34d399" />
@@ -652,6 +868,16 @@ export default function WatchPage() {
                 {sub.name || `Track ${idx + 1}`}
               </button>
             ))}
+            <button
+              type="button"
+              className="sub-settings-trigger"
+              onClick={() => setShowSubSettings(true)}
+              id="open-sub-settings-btn"
+              title="Customize subtitle size, color, background and position"
+            >
+              <Sliders size={14} />
+              <span>Subtitle Settings</span>
+            </button>
           </div>
         )}
 

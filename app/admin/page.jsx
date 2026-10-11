@@ -66,12 +66,49 @@ export default function AdminPage() {
   const [testStreamUrl, setTestStreamUrl] = useState('');
   const [copiedSql, setCopiedSql] = useState(false);
 
-  // Direct Storage Upload State
+  // Direct Storage Upload & Google Drive State
+  const [sourceMode, setSourceMode] = useState('upload'); // 'upload' | 'gdrive' | 'link'
+  const [gdriveInputUrl, setGdriveInputUrl] = useState('');
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
   const videoInputRef = useRef(null);
   const subInputRef = useRef(null);
   const [subUploadIndex, setSubUploadIndex] = useState(null);
+  const [subSearchId, setSubSearchId] = useState('');
+  const [subSearching, setSubSearching] = useState(false);
+
+  function handleConnectGDrive() {
+    if (!gdriveInputUrl.trim()) return;
+    const match = gdriveInputUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+                  gdriveInputUrl.match(/id=([a-zA-Z0-9_-]+)/) ||
+                  gdriveInputUrl.match(/^([a-zA-Z0-9_-]{20,})$/);
+    if (match) {
+      const fileId = match[1];
+      setStreamUrl(`/api/stream/gdrive?id=${fileId}`);
+      setStatusMessage({ text: 'Connected 5TB Google Drive video stream! 1080p native playback ready.', type: 'success' });
+    } else {
+      setStreamUrl(gdriveInputUrl.trim());
+    }
+  }
+
+  async function handleFetchSubtitles() {
+    const queryId = subSearchId.trim() || id || (title ? title.toLowerCase() : '') || '969681';
+    setSubSearching(true);
+    try {
+      const res = await fetch(`/api/subtitles/search?id=${encodeURIComponent(queryId)}&title=${encodeURIComponent(title || '')}`);
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.subtitles) && data.subtitles.length > 0) {
+        setSubtitles(data.subtitles);
+        setStatusMessage({ text: `Auto-fetched ${data.subtitles.length} international subtitle tracks!`, type: 'success' });
+      } else {
+        setStatusMessage({ text: 'No external subtitles found for this ID.', type: 'error' });
+      }
+    } catch (err) {
+      setStatusMessage({ text: `Subtitle fetch error: ${err.message}`, type: 'error' });
+    } finally {
+      setSubSearching(false);
+    }
+  }
 
   async function handleFileUpload(file, folder = 'videos', targetIndex = null) {
     if (!file) return;
@@ -278,6 +315,9 @@ export default function AdminPage() {
     setIsFeatured(false);
     setSubtitles([{ name: 'English (CC)', url: '', isDefault: true }]);
     setTestStreamUrl('');
+    setSourceMode('upload');
+    setUploadStatus('');
+    setSubSearchId('');
   }
 
   // Populate form for editing
@@ -286,6 +326,29 @@ export default function AdminPage() {
     setId(movie.id);
     setTitle(movie.title || '');
     setStreamUrl(movie.stream_url || '');
+    const isGDrive = Boolean(
+      movie.stream_url && (
+        movie.stream_url.includes('drive.google.com') ||
+        movie.stream_url.includes('/api/stream/gdrive')
+      )
+    );
+    const isDirectStorage = Boolean(
+      movie.stream_url && (
+        movie.stream_url.includes('supabase.co') ||
+        movie.stream_url.endsWith('.mp4') ||
+        movie.stream_url.endsWith('.webm')
+      )
+    );
+    if (isGDrive) {
+      setSourceMode('gdrive');
+      setGdriveInputUrl(movie.stream_url);
+    } else if (isDirectStorage) {
+      setSourceMode('upload');
+    } else {
+      setSourceMode('link');
+    }
+    setUploadStatus('');
+    setSubSearchId(movie.id || '');
     setPosterUrl(movie.poster_url || '');
     setBackdropUrl(movie.backdrop_url || '');
     setDescription(movie.description || '');
@@ -1011,84 +1074,288 @@ create policy "Allow service role full access"
                 />
               </div>
 
-              {/* Stream URL */}
+              {/* Stream Source Mode Selector */}
               <div className="form-group-full">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
                   <label className="input-label" style={{ margin: 0 }}>
-                    Stream URL (.m3u8 HLS or .mp4 direct link) *
+                    Stream Source Mode *
                   </label>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <input
-                      type="file"
-                      ref={videoInputRef}
-                      style={{ display: 'none' }}
-                      accept="video/mp4,video/webm,video/x-matroska"
-                      onChange={(e) => {
-                        if (e.target.files?.[0]) handleFileUpload(e.target.files[0], 'videos');
-                      }}
-                    />
+                  <div style={{ display: 'flex', gap: 8, background: 'rgba(0,0,0,0.3)', padding: 4, borderRadius: 8, border: '1px solid var(--border)', flexWrap: 'wrap' }}>
                     <button
                       type="button"
-                      onClick={() => videoInputRef.current?.click()}
-                      disabled={uploadLoading}
+                      onClick={() => setSourceMode('upload')}
                       style={{
-                        fontSize: '0.78rem',
-                        background: 'rgba(99, 102, 241, 0.15)',
-                        color: '#a5b4fc',
-                        border: '1px solid rgba(99, 102, 241, 0.4)',
-                        padding: '4px 10px',
+                        padding: '6px 14px',
                         borderRadius: 6,
-                        display: 'inline-flex',
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        background: sourceMode === 'upload' ? 'var(--primary)' : 'transparent',
+                        color: sourceMode === 'upload' ? '#fff' : 'var(--text-secondary)',
+                        border: 'none',
+                        display: 'flex',
                         alignItems: 'center',
                         gap: 6,
-                        cursor: 'pointer'
+                        cursor: 'pointer',
+                        transition: '0.15s ease'
                       }}
                     >
-                      {uploadLoading ? <RefreshCw size={13} className="spin" /> : <Upload size={13} />}
-                      <span>{uploadLoading ? 'Uploading...' : '☁️ Upload MP4 to Supabase'}</span>
+                      <Upload size={14} /> ☁️ Supabase Upload
                     </button>
-                    {streamUrl && (
-                      <button
-                        type="button"
-                        onClick={() => setTestStreamUrl(streamUrl)}
-                        style={{ fontSize: '0.78rem', color: 'var(--primary)', fontWeight: 600 }}
-                      >
-                        Test Play Link &rarr;
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setSourceMode('gdrive')}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: 6,
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        background: sourceMode === 'gdrive' ? 'var(--primary)' : 'transparent',
+                        color: sourceMode === 'gdrive' ? '#fff' : 'var(--text-secondary)',
+                        border: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        cursor: 'pointer',
+                        transition: '0.15s ease'
+                      }}
+                    >
+                      <Film size={14} /> 📁 Google Drive (5TB Account)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSourceMode('link')}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: 6,
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        background: sourceMode === 'link' ? 'var(--primary)' : 'transparent',
+                        color: sourceMode === 'link' ? '#fff' : 'var(--text-secondary)',
+                        border: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        cursor: 'pointer',
+                        transition: '0.15s ease'
+                      }}
+                    >
+                      <ExternalLink size={14} /> 🔗 External Link / Embed
+                    </button>
                   </div>
                 </div>
+
                 <input
-                  type="url"
-                  className="form-input"
-                  placeholder="https://.../movie.mp4 or Supabase Storage link"
-                  value={streamUrl}
-                  onChange={(e) => setStreamUrl(e.target.value)}
-                  required
-                  id="form-stream-url"
+                  type="file"
+                  ref={videoInputRef}
+                  style={{ display: 'none' }}
+                  accept="video/mp4,video/webm,video/x-matroska"
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) handleFileUpload(e.target.files[0], 'videos');
+                  }}
                 />
-                {uploadStatus && (
-                  <div style={{
-                    marginTop: 8,
-                    padding: '8px 12px',
-                    borderRadius: 6,
-                    fontSize: '0.8rem',
-                    background: uploadStatus.startsWith('✅') ? 'rgba(16, 185, 129, 0.2)' : 'rgba(99, 102, 241, 0.2)',
-                    color: uploadStatus.startsWith('✅') ? '#86efac' : '#c7d2fe',
-                    border: '1px solid rgba(255,255,255,0.1)'
-                  }}>
-                    {uploadStatus}
+
+                {/* MODE 1: Direct Storage Upload */}
+                {sourceMode === 'upload' ? (
+                  <div>
+                    {streamUrl && (streamUrl.includes('supabase.co') || streamUrl.endsWith('.mp4') || streamUrl.endsWith('.webm')) ? (
+                      <div style={{
+                        background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(6, 78, 59, 0.2))',
+                        border: '1px solid rgba(16, 185, 129, 0.35)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '18px 20px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#86efac', fontSize: '0.98rem' }}>
+                              <CheckCircle2 size={19} color="#10b981" />
+                              <span>Active Video File in Supabase Storage</span>
+                            </div>
+                            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                              100% Ad-Free Native Cinema Stream ready. Viewers enjoy pure HTML5 playback with multi-language subtitle tracks.
+                            </p>
+                          </div>
+                          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => setTestStreamUrl(streamUrl)}
+                              className="nav-btn nav-btn-ghost"
+                              style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+                            >
+                              <Play size={14} /> Preview Stream
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => videoInputRef.current?.click()}
+                              disabled={uploadLoading}
+                              className="nav-btn nav-btn-primary"
+                              style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+                            >
+                              {uploadLoading ? <RefreshCw size={14} className="spin" /> : <Upload size={14} />}
+                              <span>Replace Video</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setStreamUrl('')}
+                              className="nav-btn nav-btn-ghost"
+                              style={{ fontSize: '0.8rem', padding: '6px 12px', color: '#f87171' }}
+                            >
+                              <Trash2 size={14} /> Remove
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        onClick={() => videoInputRef.current?.click()}
+                        style={{
+                          border: '2px dashed rgba(99, 102, 241, 0.45)',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '36px 20px',
+                          textAlign: 'center',
+                          cursor: uploadLoading ? 'not-allowed' : 'pointer',
+                          background: 'rgba(99, 102, 241, 0.05)',
+                          transition: '0.2s ease'
+                        }}
+                      >
+                        {uploadLoading ? (
+                          <RefreshCw size={36} className="spin" color="#818cf8" style={{ margin: '0 auto 12px' }} />
+                        ) : (
+                          <Upload size={36} color="#818cf8" style={{ margin: '0 auto 12px' }} />
+                        )}
+                        <div style={{ fontWeight: 700, color: '#fff', fontSize: '1.05rem' }}>
+                          {uploadLoading ? 'Uploading Movie to Supabase Storage...' : 'Click to Upload MP4 Movie File'}
+                        </div>
+                        <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginTop: 6 }}>
+                          Stored permanently in your Supabase bucket. Enables full 1080p Artplayer with zero ads, zero popups, and no token expiration.
+                        </p>
+                      </div>
+                    )}
+                    {uploadStatus && (
+                      <div style={{
+                        marginTop: 10,
+                        padding: '8px 14px',
+                        borderRadius: 6,
+                        fontSize: '0.82rem',
+                        background: uploadStatus.startsWith('✅') ? 'rgba(16, 185, 129, 0.18)' : 'rgba(99, 102, 241, 0.18)',
+                        color: uploadStatus.startsWith('✅') ? '#86efac' : '#c7d2fe',
+                        border: '1px solid rgba(255,255,255,0.1)'
+                      }}>
+                        {uploadStatus}
+                      </div>
+                    )}
+                  </div>
+                ) : sourceMode === 'gdrive' ? (
+                  /* MODE 2: Google Drive 5TB Account */
+                  <div>
+                    {streamUrl && (streamUrl.includes('gdrive') || streamUrl.includes('drive.google.com')) ? (
+                      <div style={{
+                        background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(30, 58, 138, 0.2))',
+                        border: '1px solid rgba(59, 130, 246, 0.35)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '18px 20px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#93c5fd', fontSize: '0.98rem' }}>
+                              <CheckCircle2 size={19} color="#3b82f6" />
+                              <span>Active 5TB Google Drive Pro Stream Connected</span>
+                            </div>
+                            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                              Direct 1080p proxy stream with byte-range seeking (HTTP 206) and zero ads. Stored in your Google Drive.
+                            </p>
+                          </div>
+                          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => setTestStreamUrl(streamUrl)}
+                              className="nav-btn nav-btn-ghost"
+                              style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+                            >
+                              <Play size={14} /> Preview Stream
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setStreamUrl(''); setGdriveInputUrl(''); }}
+                              className="nav-btn nav-btn-ghost"
+                              style={{ fontSize: '0.8rem', padding: '6px 12px', color: '#f87171' }}
+                            >
+                              <Trash2 size={14} /> Disconnect
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{
+                        border: '1px solid rgba(59, 130, 246, 0.3)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '24px 20px',
+                        background: 'rgba(59, 130, 246, 0.05)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                          <Film size={22} color="#60a5fa" />
+                          <div style={{ fontWeight: 700, color: '#fff', fontSize: '1rem' }}>
+                            Connect Video from your 5TB Google Drive Pro
+                          </div>
+                        </div>
+                        <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5 }}>
+                          1. In Google Drive, right-click your MP4 movie and set Share to <strong>"Anyone with the link can view"</strong>.<br />
+                          2. Paste the share link below. WatchBox will stream it directly in full 1080p with zero ads, high-speed buffering, and custom subtitles.
+                        </p>
+                        <div style={{ display: 'flex', gap: 10 }}>
+                          <input
+                            type="text"
+                            className="form-input"
+                            placeholder="https://drive.google.com/file/d/1XyZ.../view?usp=sharing or File ID"
+                            value={gdriveInputUrl}
+                            onChange={(e) => setGdriveInputUrl(e.target.value)}
+                            style={{ flex: 1 }}
+                          />
+                          <button
+                            type="button"
+                            onClick={handleConnectGDrive}
+                            className="nav-btn nav-btn-primary"
+                            style={{ whiteSpace: 'nowrap', padding: '0 20px' }}
+                          >
+                            Connect Video
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* MODE 3: External Stream / Embed Link */
+                  <div>
+                    <input
+                      type="url"
+                      className="form-input"
+                      placeholder="https://vidlink.pro/movie/969681 or external .m3u8 stream link"
+                      value={streamUrl}
+                      onChange={(e) => setStreamUrl(e.target.value)}
+                      required={sourceMode === 'link'}
+                      id="form-stream-url"
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                      <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
+                        Enter an embed URL or third-party manifest. Viewers will use the Web Embed Player.
+                      </p>
+                      {streamUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setTestStreamUrl(streamUrl)}
+                          style={{ fontSize: '0.78rem', color: 'var(--primary)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer' }}
+                        >
+                          Test Play Link &rarr;
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
-                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                  Direct viewer playback. Upload an MP4 to your connected Supabase Storage for 100% ad-free, 1080p native streaming with zero expiration!
-                </p>
 
                 {/* Inline Video Tester */}
                 {testStreamUrl && (
-                  <div className="stream-tester-box">
+                  <div className="stream-tester-box" style={{ marginTop: 14 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Previewing Stream:</span>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Previewing Video File:</span>
                       <button type="button" onClick={() => setTestStreamUrl('')} style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
                         Close Preview
                       </button>
@@ -1105,18 +1372,35 @@ create policy "Allow service role full access"
 
               {/* Subtitles Management */}
               <div className="form-group-full">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <label className="input-label" style={{ margin: 0 }}>
-                    Subtitle Tracks (.vtt or .srt)
-                  </label>
-                  <button
-                    type="button"
-                    onClick={addSubtitleField}
-                    className="btn-add-sub"
-                    id="add-subtitle-track-btn"
-                  >
-                    <Plus size={14} /> Add Another Subtitle Language
-                  </button>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 10 }}>
+                  <div>
+                    <label className="input-label" style={{ margin: 0 }}>
+                      Subtitle Tracks (International Multi-Language Standards)
+                    </label>
+                    <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                      Supports WebVTT (.vtt) & SubRip (.srt). Automatically converted and CORS-enabled.
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={handleFetchSubtitles}
+                      disabled={subSearching}
+                      className="nav-btn nav-btn-primary"
+                      style={{ fontSize: '0.78rem', padding: '6px 14px' }}
+                    >
+                      {subSearching ? <RefreshCw size={13} className="spin" /> : <Wand2 size={13} />}
+                      <span>{subSearching ? 'Fetching Subs...' : '🌐 Auto-Fetch Subtitles (Wyzie / OpenSubs)'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={addSubtitleField}
+                      className="btn-add-sub"
+                      id="add-subtitle-track-btn"
+                    >
+                      <Plus size={14} /> Add Manual Language
+                    </button>
+                  </div>
                 </div>
 
                 <input
