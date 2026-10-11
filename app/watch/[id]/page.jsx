@@ -303,8 +303,174 @@ export default function WatchPage() {
 
     let activeArt = null;
 
+    function cinemaDoubleTapPlugin(art) {
+      const { $player } = art.template;
+      if (!$player) return;
+
+      let layer = $player.querySelector('.cinema-double-tap-layer');
+      if (!layer) {
+        layer = document.createElement('div');
+        layer.className = 'cinema-double-tap-layer';
+        layer.innerHTML = `
+          <div class="double-tap-zone left" id="dt-zone-left">
+            <div class="double-tap-ripple-content">
+              <div class="double-tap-icon-wrapper">
+                <svg class="double-tap-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="11 17 6 12 11 7"></polyline>
+                  <polyline points="18 17 13 12 18 7"></polyline>
+                </svg>
+                <svg class="double-tap-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="11 17 6 12 11 7"></polyline>
+                  <polyline points="18 17 13 12 18 7"></polyline>
+                </svg>
+              </div>
+              <div class="double-tap-seconds" id="dt-sec-left">-10 seconds</div>
+            </div>
+          </div>
+          <div class="double-tap-zone right" id="dt-zone-right">
+            <div class="double-tap-ripple-content">
+              <div class="double-tap-icon-wrapper">
+                <svg class="double-tap-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="13 17 18 12 13 7"></polyline>
+                  <polyline points="6 17 11 12 6 7"></polyline>
+                </svg>
+                <svg class="double-tap-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="13 17 18 12 13 7"></polyline>
+                  <polyline points="6 17 11 12 6 7"></polyline>
+                </svg>
+              </div>
+              <div class="double-tap-seconds" id="dt-sec-right">+10 seconds</div>
+            </div>
+          </div>
+        `;
+        $player.appendChild(layer);
+      }
+
+      const leftZone = layer.querySelector('#dt-zone-left');
+      const rightZone = layer.querySelector('#dt-zone-right');
+      const leftSec = layer.querySelector('#dt-sec-left');
+      const rightSec = layer.querySelector('#dt-sec-right');
+
+      let accumulatedSeconds = 0;
+      let currentSide = null;
+      let resetTimer = null;
+      let wasPlayingBeforeTap = false;
+
+      function triggerSeek(side) {
+        const isForward = side === 'right';
+        const activeZone = isForward ? rightZone : leftZone;
+        const activeSecEl = isForward ? rightSec : leftSec;
+        const inactiveZone = isForward ? leftZone : rightZone;
+
+        if (inactiveZone) inactiveZone.classList.remove('active');
+
+        if (currentSide === side) {
+          accumulatedSeconds += 10;
+        } else {
+          accumulatedSeconds = 10;
+          currentSide = side;
+        }
+
+        if (activeSecEl) {
+          activeSecEl.textContent = `${isForward ? '+' : '-'}${accumulatedSeconds} seconds`;
+        }
+
+        if (activeZone) {
+          activeZone.classList.remove('active');
+          void activeZone.offsetWidth; // Force CSS animation restart
+          activeZone.classList.add('active');
+        }
+
+        if (isForward) {
+          const dur = art.duration || Infinity;
+          art.seek = Math.min(dur, art.currentTime + 10);
+          if (art.notice) art.notice.show = `+${accumulatedSeconds}s Forward`;
+        } else {
+          art.seek = Math.max(0, art.currentTime - 10);
+          if (art.notice) art.notice.show = `-${accumulatedSeconds}s Backward`;
+        }
+
+        if (wasPlayingBeforeTap && !art.playing) {
+          art.play().catch(() => {});
+        }
+
+        clearTimeout(resetTimer);
+        resetTimer = setTimeout(() => {
+          if (activeZone) activeZone.classList.remove('active');
+          accumulatedSeconds = 0;
+          currentSide = null;
+        }, 650);
+      }
+
+      art.on('dblclick', (e) => {
+        const rect = $player.getBoundingClientRect();
+        const clientX = e.clientX || 0;
+        const relX = clientX - rect.left;
+        const ratio = relX / rect.width;
+
+        if (ratio < 0.45) {
+          triggerSeek('left');
+        } else if (ratio > 0.55) {
+          triggerSeek('right');
+        } else {
+          art.fullscreen = !art.fullscreen;
+        }
+      });
+
+      let lastTouchTime = 0;
+      let lastTouchSide = null;
+
+      function onTouchEnd(e) {
+        if (!e.changedTouches || !e.changedTouches[0]) return;
+        const touch = e.changedTouches[0];
+        const rect = $player.getBoundingClientRect();
+        const relX = touch.clientX - rect.left;
+        const ratio = relX / rect.width;
+
+        const side = ratio < 0.45 ? 'left' : ratio > 0.55 ? 'right' : null;
+        if (!side) return;
+
+        const now = Date.now();
+        if (now - lastTouchTime < 350 && lastTouchSide === side) {
+          if (e.cancelable) e.preventDefault();
+          triggerSeek(side);
+          lastTouchTime = 0;
+        } else {
+          lastTouchTime = now;
+          lastTouchSide = side;
+          wasPlayingBeforeTap = art.playing;
+        }
+      }
+
+      $player.addEventListener('touchend', onTouchEnd, { passive: false });
+
+      if (art.hotkey) {
+        art.hotkey.add('ArrowRight', () => {
+          triggerSeek('right');
+        });
+        art.hotkey.add('ArrowLeft', () => {
+          triggerSeek('left');
+        });
+      }
+
+      return {
+        name: 'cinemaDoubleTapSeek',
+        triggerSeek,
+        destroy() {
+          clearTimeout(resetTimer);
+          $player.removeEventListener('touchend', onTouchEnd);
+          if (layer && layer.parentNode) {
+            layer.parentNode.removeChild(layer);
+          }
+        }
+      };
+    }
+
     const initArt = (ArtplayerConstructor, HlsConstructor) => {
       if (!ArtplayerConstructor || !artRef.current) return;
+
+      ArtplayerConstructor.DBCLICK_FULLSCREEN = false;
+      ArtplayerConstructor.MOBILE_DBCLICK_PLAY = false;
 
       if (playerInstanceRef.current && playerInstanceRef.current.destroy) {
         playerInstanceRef.current.destroy(false);
@@ -378,6 +544,7 @@ export default function WatchPage() {
           playsInline: true,
           theme: '#6366f1',
           lang: 'en',
+          plugins: [cinemaDoubleTapPlugin],
           customType: {
             m3u8: function (video, url) {
               if (HlsConstructor && HlsConstructor.isSupported()) {
