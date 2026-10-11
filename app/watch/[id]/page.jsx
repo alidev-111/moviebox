@@ -107,29 +107,38 @@ export default function WatchPage() {
       .then((data) => {
         setMovie(data);
         setError('');
+
+        // If the movie has a direct file (Google Drive or Supabase Storage), we DO NOT need the pirate resolver
+        const hasDirectFile = Boolean(
+          data?.stream_url && (
+            data.stream_url.includes('drive.google.com') ||
+            data.stream_url.includes('/api/stream/gdrive') ||
+            data.stream_url.includes('supabase.co') ||
+            data.stream_url.endsWith('.mp4') ||
+            data.stream_url.endsWith('.webm')
+          )
+        );
+
+        if (!hasDirectFile) {
+          setIsResolving(true);
+          fetch(`/api/resolve?id=${id}`)
+            .then((r) => r.json())
+            .then((rData) => {
+              if (rData && rData.success && rData.streamUrl) {
+                setResolvedStream(rData);
+              }
+            })
+            .catch(() => {})
+            .finally(() => {
+              setIsResolving(false);
+            });
+        }
       })
       .catch((err) => {
         setError(err.message);
       })
       .finally(() => {
         setLoading(false);
-      });
-
-    // Call server-side stream resolver to extract direct .m3u8 manifest (Solution 1)
-    setIsResolving(true);
-    fetch(`/api/resolve?id=${id}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data && data.success && data.streamUrl) {
-          console.log('[WatchBox Resolver] Successfully resolved direct manifest stream:', data.streamUrl);
-          setResolvedStream(data);
-        }
-      })
-      .catch((err) => {
-        console.warn('[WatchBox Resolver] Resolution fallback:', err);
-      })
-      .finally(() => {
-        setIsResolving(false);
       });
 
     // Fetch other movies for recommendations
@@ -530,19 +539,28 @@ export default function WatchPage() {
     );
   }
 
+  const isDirectStorage = Boolean(
+    movie?.stream_url && (
+      movie.stream_url.includes('drive.google.com') ||
+      movie.stream_url.includes('/api/stream/gdrive') ||
+      movie.stream_url.includes('supabase.co') ||
+      movie.stream_url.endsWith('.mp4') ||
+      movie.stream_url.endsWith('.webm')
+    )
+  );
+
   const isDirectStream = Boolean(
+    isDirectStorage ||
     resolvedStream?.streamUrl ||
     (movie?.stream_url && (
       movie.stream_url.includes('.m3u8') ||
       movie.stream_url.includes('.mp4') ||
-      movie.stream_url.includes('.webm') ||
-      movie.stream_url.includes('drive.google.com') ||
-      movie.stream_url.includes('/api/stream/gdrive') ||
-      movie.stream_url.includes('supabase.co')
+      movie.stream_url.includes('.webm')
     ))
   );
 
-  const activeMode = playerMode === 'auto' ? (isDirectStream ? 'native' : 'embed') : playerMode;
+  // If a direct storage/Google Drive video is available, ALWAYS lock to HD Native Player!
+  const activeMode = isDirectStorage ? 'native' : (playerMode === 'auto' ? (isDirectStream ? 'native' : 'embed') : playerMode);
 
   const tmdbMatch = movie?.stream_url?.match(/\/(movie|tv)\/(\d+)/) || movie?.stream_url?.match(/tmdb=(\d+)/);
   const currentTmdbId = tmdbMatch ? tmdbMatch[2] : (movie?.id?.includes('spider-man') ? '969681' : null);
@@ -754,43 +772,61 @@ export default function WatchPage() {
           </Link>
 
           <div className="player-controls-strip">
-            {/* Player Engine Switcher */}
-            <div style={{ display: 'inline-flex', background: 'rgba(255,255,255,0.06)', borderRadius: 'var(--radius-sm)', padding: 3, border: '1px solid var(--border)' }}>
-              {isDirectStream && (
+            {/* Direct Cinema Badge vs Player Switcher */}
+            {isDirectStorage ? (
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 7,
+                background: 'rgba(16, 185, 129, 0.15)',
+                border: '1px solid rgba(16, 185, 129, 0.35)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '6px 14px',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+                color: '#86efac'
+              }}>
+                <CheckCircle2 size={15} color="#10b981" />
+                <span>⚡ 1080p Ad-Free Cinema Stream (Zero Ads)</span>
+              </div>
+            ) : (
+              <div style={{ display: 'inline-flex', background: 'rgba(255,255,255,0.06)', borderRadius: 'var(--radius-sm)', padding: 3, border: '1px solid var(--border)' }}>
+                {isDirectStream && (
+                  <button
+                    onClick={() => setPlayerMode('native')}
+                    style={{
+                      padding: '5px 12px',
+                      borderRadius: 6,
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      color: activeMode === 'native' ? '#fff' : 'var(--text-secondary)',
+                      background: activeMode === 'native' ? 'var(--primary)' : 'transparent',
+                      transition: '0.15s ease'
+                    }}
+                    title="HD Native player (Pure HTML5 ArtPlayer, Zero Ads)"
+                    id="btn-native-player"
+                  >
+                    ⚡ HD Native Player (Zero Ads)
+                  </button>
+                )}
                 <button
-                  onClick={() => setPlayerMode('native')}
+                  onClick={() => setPlayerMode('embed')}
                   style={{
                     padding: '5px 12px',
                     borderRadius: 6,
                     fontSize: '0.78rem',
                     fontWeight: 600,
-                    color: activeMode === 'native' ? '#fff' : 'var(--text-secondary)',
-                    background: activeMode === 'native' ? 'var(--primary)' : 'transparent',
+                    color: (activeMode === 'embed' || !isDirectStream) ? '#fff' : 'var(--text-secondary)',
+                    background: (activeMode === 'embed' || !isDirectStream) ? 'var(--primary)' : 'transparent',
                     transition: '0.15s ease'
                   }}
-                  title="HD Native player (Pure HTML5 ArtPlayer, Zero Ads)"
-                  id="btn-native-player"
+                  title="Web Embed Player (Multi-server fallback)"
+                  id="btn-embed-player"
                 >
-                  ⚡ HD Native Player (Zero Ads)
+                  🌐 Web Embed Player
                 </button>
-              )}
-              <button
-                onClick={() => setPlayerMode('embed')}
-                style={{
-                  padding: '5px 12px',
-                  borderRadius: 6,
-                  fontSize: '0.78rem',
-                  fontWeight: 600,
-                  color: (activeMode === 'embed' || !isDirectStream) ? '#fff' : 'var(--text-secondary)',
-                  background: (activeMode === 'embed' || !isDirectStream) ? 'var(--primary)' : 'transparent',
-                  transition: '0.15s ease'
-                }}
-                title="Web Embed Player (Multi-server fallback)"
-                id="btn-embed-player"
-              >
-                🌐 Web Embed Player
-              </button>
-            </div>
+              </div>
+            )}
 
             <button
               onClick={() => setCinemaMode(!cinemaMode)}
@@ -804,8 +840,8 @@ export default function WatchPage() {
           </div>
         </div>
 
-        {/* Server Switcher */}
-        {activeMode === 'embed' && currentTmdbId && (
+        {/* Server Switcher (ONLY for third-party embeds, NEVER shown for direct storage / Google Drive videos) */}
+        {!isDirectStorage && activeMode === 'embed' && currentTmdbId && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
               Stream Server:
