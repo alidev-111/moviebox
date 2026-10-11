@@ -1171,3 +1171,32 @@ input, textarea, select {
     grid-template-columns: 1fr;
   }
 }
+
+/* WatchBox Cinema Subtitle Enhancements */
+.art-video-player .art-subtitle {
+  letter-spacing: 0.3px;
+  line-height: 1.35;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.art-video-player .art-subtitle .art-subtitle-line {
+  line-height: 1.35;
+  margin-bottom: 2px;
+}
+
+.art-video-player .art-subtitle .art-subtitle-line i,
+.art-video-player .art-subtitle .art-subtitle-line em {
+  font-style: italic !important;
+  color: inherit !important;
+}
+
+.art-video-player .art-subtitle .art-subtitle-line b,
+.art-video-player .art-subtitle .art-subtitle-line strong {
+  font-weight: 700 !important;
+  color: inherit !important;
+}
+
+.art-video-player .art-subtitle .art-subtitle-line u {
+  text-decoration: underline !important;
+  color: inherit !important;
+}

@@ -22,6 +22,7 @@ import {
   Sliders,
   Check
 } from 'lucide-react';
+import { cleanSubtitleVtt } from '@/lib/subtitles';
 
 export default function WatchPage() {
   const params = useParams();
@@ -49,6 +50,7 @@ export default function WatchPage() {
     color: '#ffffff', // '#ffffff' | '#ffe600' | '#38bdf8' | '#4ade80'
     bg: 'shadow',     // 'shadow' | 'box' | 'solid'
     position: '45px', // '45px' | '75px' | 'top'
+    formatting: 'styled', // 'styled' (formatted italics) | 'clean' (strip all tags)
   });
   const [showSubSettings, setShowSubSettings] = useState(false);
 
@@ -68,6 +70,10 @@ export default function WatchPage() {
     try {
       localStorage.setItem('watchbox_sub_settings', JSON.stringify(updated));
     } catch { }
+
+    if (newValues.formatting && newValues.formatting !== subSettings.formatting) {
+      switchSubtitle(activeSubIndex, newValues.formatting);
+    }
 
     if (playerInstanceRef.current && playerInstanceRef.current.subtitle) {
       const artSub = playerInstanceRef.current.subtitle;
@@ -316,7 +322,7 @@ export default function WatchPage() {
       if (defaultSub && defaultSub.url && defaultSub.url.trim()) {
         const isAbsolute = defaultSub.url.startsWith('http://') || defaultSub.url.startsWith('https://');
         const finalSubUrl = (isAbsolute && typeof window !== 'undefined' && !defaultSub.url.includes(window.location.host))
-          ? `/api/subtitles/proxy?url=${encodeURIComponent(defaultSub.url)}`
+          ? `/api/subtitles/proxy?url=${encodeURIComponent(defaultSub.url)}${subSettings.formatting === 'clean' ? '&stripTags=1' : ''}`
           : defaultSub.url;
 
         subtitleConfig = {
@@ -339,6 +345,8 @@ export default function WatchPage() {
             bottom: subSettings.position === 'top' ? 'calc(100% - 90px)' : subSettings.position,
           },
           encoding: 'utf-8',
+          escape: false,
+          onVttLoad: (vtt) => cleanSubtitleVtt(vtt, { stripAllTags: subSettings.formatting === 'clean' }),
         };
       }
 
@@ -459,6 +467,20 @@ export default function WatchPage() {
 
         const art = new ArtplayerConstructor(artOptions);
 
+        art.on('subtitleBeforeUpdate', (cues) => {
+          if (Array.isArray(cues)) {
+            cues.forEach((cue) => {
+              if (cue && cue.text) {
+                if (subSettings.formatting === 'clean') {
+                  cue.text = cue.text.replace(/<[^>]+>/g, '').replace(/\{[\\\/]?[^}]+\}/g, '');
+                } else {
+                  cue.text = cue.text.replace(/\{[\\\/]?[^}]+\}/g, '').replace(/<\/?font[^>]*>/gi, '');
+                }
+              }
+            });
+          }
+        });
+
         playerInstanceRef.current = art;
         activeArt = art;
       } catch (e) {
@@ -487,22 +509,25 @@ export default function WatchPage() {
   }, [scriptsLoaded, movie, activeSubIndex, playerMode, resolvedStream]);
 
   // Change subtitle track
-  function switchSubtitle(index) {
+  function switchSubtitle(index, forceFormatting) {
     setActiveSubIndex(index);
     if (!playerInstanceRef.current || !movie?.subtitles?.[index]) return;
 
     const targetSub = movie.subtitles[index];
     if (!targetSub || !targetSub.url) return;
 
+    const activeFormatting = forceFormatting || subSettings.formatting;
     const isAbsolute = targetSub.url.startsWith('http://') || targetSub.url.startsWith('https://');
     const finalUrl = (isAbsolute && typeof window !== 'undefined' && !targetSub.url.includes(window.location.host))
-      ? `/api/subtitles/proxy?url=${encodeURIComponent(targetSub.url)}`
+      ? `/api/subtitles/proxy?url=${encodeURIComponent(targetSub.url)}${activeFormatting === 'clean' ? '&stripTags=1' : ''}`
       : targetSub.url;
 
     if (playerInstanceRef.current.subtitle && playerInstanceRef.current.subtitle.switch) {
       playerInstanceRef.current.subtitle.switch(finalUrl, {
         name: targetSub.name,
         type: targetSub.url.toLowerCase().endsWith('.srt') ? 'srt' : 'vtt',
+        escape: false,
+        onVttLoad: (vtt) => cleanSubtitleVtt(vtt, { stripAllTags: activeFormatting === 'clean' }),
       });
     }
   }
@@ -649,7 +674,11 @@ export default function WatchPage() {
                 lineHeight: 1.35,
                 transition: '0.15s ease',
               }}>
-                WatchBox Cinema • Sample Subtitle (Netflix Std)
+                {subSettings.formatting === 'styled' ? (
+                  <i>WatchBox Cinema • Sample Subtitle (Netflix Std)</i>
+                ) : (
+                  'WatchBox Cinema • Sample Subtitle (Netflix Std)'
+                )}
               </div>
             </div>
 
@@ -745,6 +774,30 @@ export default function WatchPage() {
               </div>
             </div>
 
+            {/* Tag Formatting Option (Fixes raw <i> / <font> tags) */}
+            <div className="sub-setting-row">
+              <div className="sub-setting-title">
+                <span>Tag Handling & Formatting (Zero Raw Markup)</span>
+                <span style={{ color: '#818cf8' }}>
+                  {subSettings.formatting === 'styled' ? '✨ Formatted Italics (Netflix Std)' : '🔤 Clean Plain Text'}
+                </span>
+              </div>
+              <div className="sub-options-grid">
+                {[
+                  { label: '✨ Formatted Italics (No Raw Tags)', val: 'styled' },
+                  { label: '🔤 Clean Plain Text (Strip All Tags)', val: 'clean' },
+                ].map((item) => (
+                  <button
+                    key={item.val}
+                    className={`sub-opt-btn ${subSettings.formatting === item.val ? 'active' : ''}`}
+                    onClick={() => applySubStyle({ formatting: item.val })}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Standards Compliance Note */}
             <div style={{
               marginTop: 18,
@@ -757,7 +810,7 @@ export default function WatchPage() {
               lineHeight: 1.5,
             }}>
               💡 <strong>International Guidelines (Netflix Timed Text & BBC Standards):</strong><br />
-              Subtitles use proportional sans-serif font, maximum 2 lines per cue, 37–42 characters per line, with title-safe margins to prevent overlap with scrubber controls.
+              Raw markup tags like <code>&lt;i&gt;</code>, <code>&lt;font&gt;</code>, and <code>&#123;\an8&#125;</code> are strictly parsed or stripped so raw code never appears on screen. Subtitles use proportional sans-serif font, maximum 2 lines per cue, with title-safe margins.
             </div>
           </div>
         </div>

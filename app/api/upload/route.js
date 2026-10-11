@@ -1,19 +1,8 @@
 import { NextResponse } from 'next/server';
 import { supabase, isSupabaseConfigured } from '@/lib/db';
+import { cleanSubtitleVtt } from '@/lib/subtitles';
 
 const ADMIN_SECRET_KEY = process.env.ADMIN_SECRET_KEY || 'alikon123';
-
-function convertSrtToVtt(srtContent) {
-  let cleaned = srtContent
-    .replace(/\r+/g, '')
-    .replace(/^\d+\n(?=\d{2}:\d{2}:\d{2})/gm, '')
-    .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
-
-  if (!cleaned.startsWith('WEBVTT')) {
-    cleaned = 'WEBVTT\n\n' + cleaned;
-  }
-  return cleaned;
-}
 
 export async function POST(request) {
   try {
@@ -48,12 +37,9 @@ export async function POST(request) {
     // Subtitle conversion & standardization to WebVTT
     if (folder === 'subtitles') {
       const text = uploadBuffer.toString('utf-8');
-      const isSrt = sanitizedName.toLowerCase().endsWith('.srt') || !text.startsWith('WEBVTT');
-      if (isSrt) {
-        const vttText = convertSrtToVtt(text);
-        uploadBuffer = Buffer.from(vttText, 'utf-8');
-        finalFileName = sanitizedName.replace(/\.srt$/i, '') + '.vtt';
-      }
+      const vttText = cleanSubtitleVtt(text);
+      uploadBuffer = Buffer.from(vttText, 'utf-8');
+      finalFileName = sanitizedName.replace(/\.srt$/i, '') + (sanitizedName.toLowerCase().endsWith('.vtt') ? '' : '.vtt');
       uploadContentType = 'text/vtt; charset=utf-8';
     }
 

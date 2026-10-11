@@ -1,22 +1,11 @@
 import { NextResponse } from 'next/server';
-
-function convertSrtToVtt(srtContent) {
-  // International WebVTT converter with numeric counter stripping and comma-to-period timestamp normalization
-  let cleaned = srtContent
-    .replace(/\r+/g, '')
-    .replace(/^\d+\n(?=\d{2}:\d{2}:\d{2})/gm, '')
-    .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
-
-  if (!cleaned.startsWith('WEBVTT')) {
-    cleaned = 'WEBVTT\n\n' + cleaned;
-  }
-  return cleaned;
-}
+import { cleanSubtitleVtt } from '@/lib/subtitles';
 
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const targetUrl = searchParams.get('url');
+    const stripAll = searchParams.get('stripTags') === '1' || searchParams.get('stripTags') === 'true';
 
     if (!targetUrl) {
       return NextResponse.json({ error: 'Missing "url" query parameter' }, { status: 400 });
@@ -48,18 +37,8 @@ export async function GET(request) {
       );
     }
 
-    let text = await response.text();
-    // Remove UTF-8 BOM if present
-    if (text.charCodeAt(0) === 0xfeff) {
-      text = text.slice(1);
-    }
-
-    let isSrt = targetUrl.toLowerCase().endsWith('.srt') || !text.startsWith('WEBVTT');
-    let vttContent = text;
-
-    if (isSrt) {
-      vttContent = convertSrtToVtt(text);
-    }
+    const text = await response.text();
+    const vttContent = cleanSubtitleVtt(text, { stripAllTags: stripAll });
 
     return new Response(vttContent, {
       status: 200,
