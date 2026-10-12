@@ -2,7 +2,7 @@
   {
     "id": "spider-man-brand-new-day",
     "title": "Spider-Man: Brand New Day",
-    "stream_url": "https://vidlink.pro/movie/969681",
+    "stream_url": "https://drive.google.com/file/d/1y7EQ24RA7Zy-xcdAJSuV9Q7aL7cn0GQh/view?usp=sharing",
     "poster_url": "https://image.tmdb.org/t/p/w500/subj7knTn4DeS6KS7qI66EQKe9i.jpg",
     "backdrop_url": "https://image.tmdb.org/t/p/original/subj7knTn4DeS6KS7qI66EQKe9i.jpg",
     "description": "Peter Parker embarks on a brand new chapter, confronting new adversaries and personal stakes while guarding the streets of New York City.",
@@ -10,9 +10,15 @@
     "release_year": 2026,
     "duration": "2h 25m",
     "rating": "HD 1080p",
-    "subtitles": [],
+    "subtitles": [
+      {
+        "url": "https://pmaavbcufgemwcfvivqp.supabase.co/storage/v1/object/public/movies/subtitles/1791678924643_Spider-Man__Brand_New_Day_en.vtt",
+        "name": "Spider Man  Brand New Day en",
+        "isDefault": true
+      }
+    ],
     "is_featured": true,
-    "updated_at": "2026-10-10T18:50:46.321Z",
-    "created_at": "2026-10-10T16:52:42.862Z"
+    "updated_at": "2026-10-12T08:40:12.245Z",
+    "created_at": "2026-10-10T16:52:42.862+00:00"
   }
 ]

@@ -13,9 +13,15 @@ create table if not exists movies (
   rating text default 'PG-13',
   subtitles jsonb default '[]'::jsonb,
   is_featured boolean default false,
+  type text default 'movie',
+  episodes jsonb default '[]'::jsonb,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+
+-- Migration for existing installations:
+alter table movies add column if not exists type text default 'movie';
+alter table movies add column if not exists episodes jsonb default '[]'::jsonb;
 
 -- Enable Row Level Security
 alter table movies enable row level security;

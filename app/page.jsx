@@ -62,6 +62,13 @@ export default function HomePage() {
           >
             <div className="hero-overlay" />
             <div className="hero-content">
+              {(featuredMovie.type === 'series' || (Array.isArray(featuredMovie.episodes) && featuredMovie.episodes.length > 0)) && (
+                <div style={{ marginBottom: 12 }}>
+                  <span className="badge badge-featured" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', padding: '5px 12px', fontSize: '0.8rem' }}>
+                    📺 TV Series • {featuredMovie.episodes?.length ? `${featuredMovie.episodes.length} Episodes` : featuredMovie.duration}
+                  </span>
+                </div>
+              )}
 
               <h1 className="hero-title">{featuredMovie.title}</h1>
 
@@ -99,7 +106,7 @@ export default function HomePage() {
         <div className="catalog-header">
           <div>
             <h2 className="section-title">
-              <span>Movie Catalog</span>
+              <span>Watch Catalog</span>
               <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 400 }}>
                 ({filteredMovies.length} Available)
               </span>
@@ -112,7 +119,7 @@ export default function HomePage() {
               <input
                 type="text"
                 className="search-input"
-                placeholder="Search movies"
+                placeholder="Search movies & series"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 id="search-input"
@@ -138,22 +145,23 @@ export default function HomePage() {
         {loading ? (
           <div className="empty-state">
             <RefreshCw size={28} className="spin" style={{ marginBottom: 12, animation: 'spin 1.5s linear infinite' }} />
-            <p>Loading available movies...</p>
+            <p>Loading available titles...</p>
           </div>
         ) : filteredMovies.length === 0 ? (
           <div className="empty-state">
             <AlertCircle size={36} color="#94a3b8" style={{ marginBottom: 12 }} />
-            <h3 style={{ fontSize: '1.2rem', marginBottom: 6 }}>No movies found</h3>
+            <h3 style={{ fontSize: '1.2rem', marginBottom: 6 }}>No titles found</h3>
             <p style={{ color: 'var(--text-muted)', marginBottom: 18 }}>
               Try adjusting your search terms or genre filter.
             </p>
             <button onClick={() => { setSearchTerm(''); setSelectedGenre('All'); }} className="nav-btn nav-btn-primary">
-              View All Movies
+              View All
             </button>
           </div>
         ) : (
           <div className="movies-grid" id="movies-grid">
             {filteredMovies.map((movie) => {
+              const isSeriesItem = movie.type === 'series' || (Array.isArray(movie.episodes) && movie.episodes.length > 0);
               return (
                 <Link
                   key={movie.id}
@@ -168,6 +176,11 @@ export default function HomePage() {
                       className="card-poster"
                       loading="lazy"
                     />
+                    {isSeriesItem && (
+                      <span className="badge badge-series-tag">
+                        📺 Series {movie.episodes?.length ? `(${movie.episodes.length} Eps)` : ''}
+                      </span>
+                    )}
                     <div className="poster-overlay">
                       <div className="play-hover-btn">
                         <Play size={22} fill="#fff" />

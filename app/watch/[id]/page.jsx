@@ -20,7 +20,11 @@ import {
   Settings,
   X,
   Sliders,
-  Check
+  Check,
+  Tv,
+  SkipBack,
+  SkipForward,
+  ListVideo
 } from 'lucide-react';
 import { cleanSubtitleVtt } from '@/lib/subtitles';
 
@@ -52,6 +56,35 @@ export default function WatchPage() {
   const [playerMode, setPlayerMode] = useState('auto'); // 'native' | 'embed' | 'auto'
   const [resolvedStream, setResolvedStream] = useState(null);
   const [isResolving, setIsResolving] = useState(false);
+  const [currentEpIndex, setCurrentEpIndex] = useState(0);
+
+  // Initialize episode index from URL query param (?ep=1, ?ep=2...)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const epParam = new URLSearchParams(window.location.search).get('ep');
+      if (epParam) {
+        const parsed = parseInt(epParam, 10);
+        if (!isNaN(parsed) && parsed > 0) {
+          setCurrentEpIndex(parsed - 1);
+        }
+      }
+    }
+  }, []);
+
+  const isSeries = Boolean(movie?.type === 'series' || (Array.isArray(movie?.episodes) && movie.episodes.length > 0));
+  const episodesList = isSeries ? (movie?.episodes || []) : [];
+  const currentEpisode = isSeries && episodesList[currentEpIndex] ? episodesList[currentEpIndex] : null;
+
+  function switchEpisode(index) {
+    if (!isSeries || index < 0 || index >= episodesList.length) return;
+    setCurrentEpIndex(index);
+    setActiveSubIndex(0);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('ep', String(index + 1));
+      window.history.replaceState({}, '', url.toString());
+    }
+  }
 
   // Subtitle Appearance Customization State (Adhering to Netflix & BBC International Standards)
   const [subSettings, setSubSettings] = useState({
@@ -278,8 +311,15 @@ export default function WatchPage() {
   useEffect(() => {
     if (!movie) return;
 
+    const activeEp = (movie.type === 'series' || (Array.isArray(movie.episodes) && movie.episodes.length > 0))
+      ? movie.episodes[currentEpIndex]
+      : null;
+
+    const rawCandidate = activeEp?.stream_url || resolvedStream?.streamUrl || movie.stream_url;
+    let streamToPlay = rawCandidate;
+
     // YouTube Unlisted streams are rendered natively via the cinema YouTube embed iframe
-    const ytId = getYouTubeId(resolvedStream?.streamUrl || movie.stream_url);
+    const ytId = getYouTubeId(streamToPlay);
     if (ytId) {
       if (playerInstanceRef.current && playerInstanceRef.current.destroy) {
         playerInstanceRef.current.destroy(false);
@@ -287,9 +327,6 @@ export default function WatchPage() {
       }
       return;
     }
-
-    const rawCandidate = resolvedStream?.streamUrl || movie.stream_url;
-    let streamToPlay = rawCandidate;
 
     // Direct Google Drive 5TB stream handling
     if (streamToPlay && (streamToPlay.includes('drive.google.com') || streamToPlay.startsWith('/api/stream/gdrive'))) {
@@ -306,13 +343,13 @@ export default function WatchPage() {
 
     const isDirect = Boolean(
       resolvedStream?.streamUrl ||
-      (movie.stream_url && (
-        movie.stream_url.includes('.m3u8') ||
-        movie.stream_url.includes('.mp4') ||
-        movie.stream_url.includes('.webm') ||
-        movie.stream_url.includes('drive.google.com') ||
-        movie.stream_url.includes('/api/stream/gdrive') ||
-        movie.stream_url.includes('supabase.co')
+      (streamToPlay && (
+        streamToPlay.includes('.m3u8') ||
+        streamToPlay.includes('.mp4') ||
+        streamToPlay.includes('.webm') ||
+        streamToPlay.includes('drive.google.com') ||
+        streamToPlay.includes('/api/stream/gdrive') ||
+        streamToPlay.includes('supabase.co')
       ))
     );
 
@@ -498,7 +535,9 @@ export default function WatchPage() {
       }
 
       const rawSubs = [
-        ...(Array.isArray(movie.subtitles) ? movie.subtitles : []),
+        ...(Array.isArray(activeEp?.subtitles) && activeEp.subtitles.length > 0
+          ? activeEp.subtitles
+          : (Array.isArray(movie.subtitles) ? movie.subtitles : [])),
         ...(Array.isArray(resolvedStream?.subtitles) ? resolvedStream.subtitles : [])
       ];
       const subtitlesList = rawSubs.filter((s, i, arr) => s.url && arr.findIndex(x => x.url === s.url) === i);
@@ -543,7 +582,7 @@ export default function WatchPage() {
           container: artRef.current,
           url: streamToPlay,
           type: isHls ? 'm3u8' : 'mp4',
-          title: movie.title,
+          title: activeEp ? `${movie.title} • ${activeEp.title || `Episode ${activeEp.episode_number || currentEpIndex + 1}`}` : movie.title,
           poster: movie.backdrop_url || movie.poster_url || '',
           volume: 0.8,
           isLive: false,
@@ -668,6 +707,17 @@ export default function WatchPage() {
           }
         });
 
+        art.on('video:ended', () => {
+          if (isSeries && currentEpIndex < episodesList.length - 1) {
+            if (art.notice) {
+              art.notice.show = `Playing Next: Episode ${currentEpIndex + 2}...`;
+            }
+            setTimeout(() => {
+              switchEpisode(currentEpIndex + 1);
+            }, 1200);
+          }
+        });
+
         playerInstanceRef.current = art;
         activeArt = art;
       } catch (e) {
@@ -693,14 +743,21 @@ export default function WatchPage() {
         activeArt.destroy(false);
       }
     };
-  }, [scriptsLoaded, movie, activeSubIndex, playerMode, resolvedStream]);
+  }, [scriptsLoaded, movie, activeSubIndex, playerMode, resolvedStream, currentEpIndex]);
 
   // Change subtitle track
   function switchSubtitle(index, forceFormatting) {
     setActiveSubIndex(index);
-    if (!playerInstanceRef.current || !movie?.subtitles?.[index]) return;
+    if (!playerInstanceRef.current) return;
 
-    const targetSub = movie.subtitles[index];
+    const currentSubs = [
+      ...(Array.isArray(currentEpisode?.subtitles) && currentEpisode.subtitles.length > 0
+        ? currentEpisode.subtitles
+        : (Array.isArray(movie?.subtitles) ? movie.subtitles : [])),
+      ...(Array.isArray(resolvedStream?.subtitles) ? resolvedStream.subtitles : [])
+    ].filter((s, i, arr) => s.url && arr.findIndex(x => x.url === s.url) === i);
+
+    const targetSub = currentSubs[index];
     if (!targetSub || !targetSub.url) return;
 
     const activeFormatting = forceFormatting || subSettings.formatting;
@@ -751,26 +808,27 @@ export default function WatchPage() {
     );
   }
 
-  const youtubeId = getYouTubeId(movie?.stream_url);
+  const currentStreamUrl = currentEpisode?.stream_url || resolvedStream?.streamUrl || movie?.stream_url;
+  const youtubeId = getYouTubeId(currentStreamUrl);
 
   const isDirectStorage = Boolean(
     youtubeId ||
-    (movie?.stream_url && (
-      movie.stream_url.includes('drive.google.com') ||
-      movie.stream_url.includes('/api/stream/gdrive') ||
-      movie.stream_url.includes('supabase.co') ||
-      movie.stream_url.endsWith('.mp4') ||
-      movie.stream_url.endsWith('.webm')
+    (currentStreamUrl && (
+      currentStreamUrl.includes('drive.google.com') ||
+      currentStreamUrl.includes('/api/stream/gdrive') ||
+      currentStreamUrl.includes('supabase.co') ||
+      currentStreamUrl.endsWith('.mp4') ||
+      currentStreamUrl.endsWith('.webm')
     ))
   );
 
   const isDirectStream = Boolean(
     isDirectStorage ||
     resolvedStream?.streamUrl ||
-    (movie?.stream_url && (
-      movie.stream_url.includes('.m3u8') ||
-      movie.stream_url.includes('.mp4') ||
-      movie.stream_url.includes('.webm')
+    (currentStreamUrl && (
+      currentStreamUrl.includes('.m3u8') ||
+      currentStreamUrl.includes('.mp4') ||
+      currentStreamUrl.includes('.webm')
     ))
   );
 
@@ -779,17 +837,24 @@ export default function WatchPage() {
     ? (youtubeId ? 'youtube' : 'native')
     : (playerMode === 'auto' ? (isDirectStream ? 'native' : 'embed') : playerMode);
 
-  const tmdbMatch = movie?.stream_url?.match(/\/(movie|tv)\/(\d+)/) || movie?.stream_url?.match(/tmdb=(\d+)/);
+  const tmdbMatch = currentStreamUrl?.match(/\/(movie|tv)\/(\d+)/) || currentStreamUrl?.match(/tmdb=(\d+)/);
   const currentTmdbId = tmdbMatch ? tmdbMatch[2] : (movie?.id?.includes('spider-man') ? '969681' : null);
 
+  const epNumber = currentEpisode?.episode_number || (currentEpIndex + 1);
   const getEmbedUrl = () => {
-    if (movie?.stream_url && (movie.stream_url.includes('drive.google.com') || movie.stream_url.includes('/api/stream/gdrive'))) {
-      const gdriveMatch = movie.stream_url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || movie.stream_url.match(/id=([a-zA-Z0-9_-]+)/);
+    if (currentStreamUrl && (currentStreamUrl.includes('drive.google.com') || currentStreamUrl.includes('/api/stream/gdrive'))) {
+      const gdriveMatch = currentStreamUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || currentStreamUrl.match(/id=([a-zA-Z0-9_-]+)/);
       if (gdriveMatch) {
         return `https://drive.google.com/file/d/${gdriveMatch[1]}/preview`;
       }
     }
-    if (!currentTmdbId) return movie?.stream_url;
+    if (!currentTmdbId) return currentStreamUrl;
+    if (isSeries) {
+      if (selectedServer === 1) return `https://vidlink.pro/tv/${currentTmdbId}/1/${epNumber}?primaryColor=6366f1&secondaryColor=4f46e5&icons=vid`;
+      if (selectedServer === 2) return `https://vidsrc.to/embed/tv/${currentTmdbId}/1/${epNumber}`;
+      if (selectedServer === 3) return `https://multiembed.mov/?video_id=${currentTmdbId}&tmdb=1&s=1&e=${epNumber}`;
+      return `https://vidlink.pro/tv/${currentTmdbId}/1/${epNumber}?primaryColor=6366f1&secondaryColor=4f46e5&icons=vid`;
+    }
     if (selectedServer === 1) return `https://vidlink.pro/movie/${currentTmdbId}?primaryColor=6366f1&secondaryColor=4f46e5&icons=vid`;
     if (selectedServer === 2) return `https://vidsrc.to/embed/movie/${currentTmdbId}`;
     if (selectedServer === 3) return `https://multiembed.mov/?video_id=${currentTmdbId}&tmdb=1`;
@@ -797,7 +862,9 @@ export default function WatchPage() {
   };
 
   const rawSubs = [
-    ...(Array.isArray(movie.subtitles) ? movie.subtitles : []),
+    ...(Array.isArray(currentEpisode?.subtitles) && currentEpisode.subtitles.length > 0
+      ? currentEpisode.subtitles
+      : (Array.isArray(movie.subtitles) ? movie.subtitles : [])),
     ...(Array.isArray(resolvedStream?.subtitles) ? resolvedStream.subtitles : [])
   ];
   const subtitlesList = rawSubs.filter((s, i, arr) => s.url && arr.findIndex(x => x.url === s.url) === i);
@@ -1142,6 +1209,40 @@ export default function WatchPage() {
           )}
         </div>
 
+        {/* Series Quick Next/Prev Episode Strip (for TV Dramas & Series) */}
+        {isSeries && episodesList.length > 0 && (
+          <div className="series-ep-nav-bar" id="series-ep-nav">
+            <button
+              type="button"
+              onClick={() => switchEpisode(currentEpIndex - 1)}
+              disabled={currentEpIndex === 0}
+              className="ep-nav-btn"
+              id="btn-prev-episode"
+              title="Previous Episode"
+            >
+              <SkipBack size={15} />
+              <span>Prev Episode</span>
+            </button>
+
+            <div className="ep-nav-center">
+              <span className="ep-nav-badge">EPISODE {currentEpIndex + 1} OF {episodesList.length}</span>
+              <span className="ep-nav-title">{currentEpisode?.title || `Episode ${currentEpIndex + 1}`}</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => switchEpisode(currentEpIndex + 1)}
+              disabled={currentEpIndex >= episodesList.length - 1}
+              className="ep-nav-btn"
+              id="btn-next-episode"
+              title="Next Episode"
+            >
+              <span>Next Episode</span>
+              <SkipForward size={15} />
+            </button>
+          </div>
+        )}
+
         {/* Subtitles Track Switcher Bar (For Native Direct Streams) */}
         {activeMode === 'native' && (
           <div className="subtitles-pill-bar" id="subtitles-track-selector">
@@ -1172,24 +1273,110 @@ export default function WatchPage() {
           </div>
         )}
 
+        {/* Series Playlist / Episodes Drawer (Netflix & Drama Standard) */}
+        {isSeries && episodesList.length > 0 && (
+          <div className="series-playlist-container" id="series-episodes-section">
+            <div className="playlist-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div className="playlist-icon-badge">
+                  <Tv size={18} />
+                </div>
+                <div>
+                  <h2 className="playlist-title">Episodes Playlist</h2>
+                  <p className="playlist-subtitle">{episodesList.length} Episodes available • Instant streaming without page reload</p>
+                </div>
+              </div>
+              <div className="playlist-active-counter">
+                Now Playing: <strong>EP {currentEpIndex + 1}</strong>
+              </div>
+            </div>
+
+            <div className="episodes-grid">
+              {episodesList.map((ep, idx) => {
+                const isActive = currentEpIndex === idx;
+                return (
+                  <div
+                    key={ep.id || idx}
+                    onClick={() => switchEpisode(idx)}
+                    className={`episode-card ${isActive ? 'active' : ''}`}
+                    id={`episode-card-${idx + 1}`}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <div className="ep-card-left">
+                      <div className={`ep-number-badge ${isActive ? 'active' : ''}`}>
+                        {isActive ? (
+                          <div className="ep-playing-equalizer">
+                            <span /><span /><span />
+                          </div>
+                        ) : (
+                          <span>{ep.episode_number || idx + 1}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="ep-card-info">
+                      <div className="ep-card-title-row">
+                        <h4 className="ep-card-title">
+                          {ep.title || `Episode ${ep.episode_number || idx + 1}`}
+                        </h4>
+                        {isActive && (
+                          <span className="badge badge-now-playing">NOW PLAYING</span>
+                        )}
+                      </div>
+                      <div className="ep-card-meta">
+                        {ep.duration && (
+                          <span className="ep-meta-item">
+                            <Clock size={12} /> {ep.duration}
+                          </span>
+                        )}
+                        {ep.stream_url && (
+                          <span className="ep-meta-badge">
+                            {ep.stream_url.includes('drive.google.com') ? 'Google Drive' : ep.stream_url.includes('youtube') ? 'YouTube' : 'HD 1080p'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="ep-card-action">
+                      <div className={`ep-play-circle ${isActive ? 'active' : ''}`}>
+                        <Play size={14} fill={isActive ? '#fff' : 'currentColor'} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Movie Info Box */}
         <div className="movie-details-box">
           <div className="details-header">
             <div>
-              <h1 className="details-title" id="movie-title">{movie.title}</h1>
+              <h1 className="details-title" id="movie-title">
+                {movie.title}
+                {isSeries && currentEpisode && (
+                  <span style={{ fontSize: '1.05rem', color: '#818cf8', display: 'block', fontWeight: 600, marginTop: 4 }}>
+                    {currentEpisode.title || `Episode ${currentEpisode.episode_number || currentEpIndex + 1}`}
+                  </span>
+                )}
+              </h1>
               <div className="details-badges">
+                {isSeries ? (
+                  <span className="badge badge-featured" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
+                    📺 TV Series • {episodesList.length} Episodes
+                  </span>
+                ) : null}
                 <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
                   <Calendar size={14} /> {movie.release_year || '2024'}
                 </span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
-                  <Clock size={14} /> {movie.duration || '2h'}
+                  <Clock size={14} /> {isSeries ? (currentEpisode?.duration || movie.duration || '45m') : (movie.duration || '2h')}
                 </span>
                 <span style={{ fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
                   {movie.genre}
                 </span>
               </div>
             </div>
-
           </div>
 
           <p className="details-desc">

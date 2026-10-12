@@ -25,7 +25,9 @@ import {
   Lock,
   LogOut,
   ArrowLeft,
-  Upload
+  Upload,
+  Tv,
+  ListVideo
 } from 'lucide-react';
 
 function getYouTubeId(url) {
@@ -66,6 +68,91 @@ export default function AdminPage() {
   const [subtitles, setSubtitles] = useState([
     { name: 'English (CC)', url: '', isDefault: true }
   ]);
+  const [contentType, setContentType] = useState('movie'); // 'movie' | 'series'
+  const [episodes, setEpisodes] = useState([]);
+  const [bulkEpisodesText, setBulkEpisodesText] = useState('');
+  const [showBulkImporter, setShowBulkImporter] = useState(false);
+
+  function addEpisode() {
+    const nextNum = episodes.length + 1;
+    setEpisodes((prev) => [
+      ...prev,
+      {
+        id: `ep-${nextNum}`,
+        episode_number: nextNum,
+        title: `Episode ${nextNum}`,
+        stream_url: '',
+        duration: '1h 00m',
+        subtitles: [],
+      }
+    ]);
+  }
+
+  function removeEpisode(idx) {
+    setEpisodes((prev) => {
+      const filtered = prev.filter((_, i) => i !== idx);
+      return filtered.map((ep, i) => ({
+        ...ep,
+        episode_number: i + 1,
+        title: ep.title && !ep.title.startsWith('Episode ') ? ep.title : `Episode ${i + 1}`,
+      }));
+    });
+  }
+
+  function updateEpisode(idx, field, value) {
+    setEpisodes((prev) => {
+      const updated = [...prev];
+      let finalVal = value;
+      if (field === 'stream_url' && typeof value === 'string') {
+        const trimmed = value.trim();
+        const match = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+                      trimmed.match(/id=([a-zA-Z0-9_-]+)/);
+        if (match) {
+          finalVal = `/api/stream/gdrive?id=${match[1]}`;
+        }
+      }
+      updated[idx] = { ...updated[idx], [field]: finalVal };
+      return updated;
+    });
+  }
+
+  function handleBulkImportEpisodes() {
+    if (!bulkEpisodesText.trim()) return;
+    const lines = bulkEpisodesText.split('\n').map((l) => l.trim()).filter(Boolean);
+    const newEpisodes = lines.map((line, idx) => {
+      let epTitle = `Episode ${idx + 1}`;
+      let url = line;
+
+      if (line.includes('|')) {
+        const parts = line.split('|');
+        epTitle = parts[0].trim();
+        url = parts[1].trim();
+      }
+
+      const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+                    url.match(/id=([a-zA-Z0-9_-]+)/);
+      if (match) {
+        url = `/api/stream/gdrive?id=${match[1]}`;
+      }
+
+      return {
+        id: `ep-${idx + 1}`,
+        episode_number: idx + 1,
+        title: epTitle,
+        stream_url: url,
+        duration: '1h 00m',
+        subtitles: [],
+      };
+    });
+
+    setEpisodes(newEpisodes);
+    setShowBulkImporter(false);
+    setBulkEpisodesText('');
+    setStatusMessage({
+      text: `Successfully created playlist of ${newEpisodes.length} episodes!`,
+      type: 'success',
+    });
+  }
 
   // Quick Stream Edit Modal State
   const [quickEditMovie, setQuickEditMovie] = useState(null);
@@ -369,6 +456,10 @@ export default function AdminPage() {
   // Reset form
   function resetForm() {
     setIsEditing(false);
+    setContentType('movie');
+    setEpisodes([]);
+    setBulkEpisodesText('');
+    setShowBulkImporter(false);
     setId('');
     setTitle('');
     setStreamUrl('');
@@ -394,6 +485,11 @@ export default function AdminPage() {
   // Populate form for editing
   function handleStartEdit(movie) {
     setIsEditing(true);
+    const isSeries = Boolean(movie.type === 'series' || (Array.isArray(movie.episodes) && movie.episodes.length > 0));
+    setContentType(isSeries ? 'series' : 'movie');
+    setEpisodes(Array.isArray(movie.episodes) ? movie.episodes : []);
+    setBulkEpisodesText('');
+    setShowBulkImporter(false);
     setId(movie.id);
     setTitle(movie.title || '');
     setStreamUrl(movie.stream_url || '');
@@ -427,9 +523,9 @@ export default function AdminPage() {
     setPosterUrl(movie.poster_url || '');
     setBackdropUrl(movie.backdrop_url || '');
     setDescription(movie.description || '');
-    setGenre(movie.genre || 'Action');
+    setGenre(movie.genre || (isSeries ? 'Drama / Series' : 'Action'));
     setReleaseYear(movie.release_year?.toString() || '2024');
-    setDuration(movie.duration || '2h');
+    setDuration(movie.duration || (isSeries ? `${movie.episodes?.length || 1} Episodes` : '2h'));
     setRating(movie.rating || 'HD 1080p');
     setIsFeatured(Boolean(movie.is_featured));
     setSubtitles(
@@ -440,10 +536,27 @@ export default function AdminPage() {
     setActiveTab('form');
   }
 
-  // Save / Update Movie
+  // Save / Update Movie or Series
   async function handleSubmit(e) {
     e.preventDefault();
-    setStatusMessage({ text: 'Saving movie...', type: 'info' });
+    setStatusMessage({ text: 'Saving content...', type: 'info' });
+
+    if (contentType === 'series') {
+      if (episodes.length === 0) {
+        setStatusMessage({ text: 'Please add at least 1 episode to the series playlist.', type: 'error' });
+        return;
+      }
+      const hasAnyStream = episodes.some((ep) => ep.stream_url && ep.stream_url.trim());
+      if (!hasAnyStream) {
+        setStatusMessage({ text: 'Please provide a stream URL or Google Drive link for at least Episode 1.', type: 'error' });
+        return;
+      }
+    } else {
+      if (!streamUrl.trim()) {
+        setStatusMessage({ text: 'Please provide a stream link or connect a video.', type: 'error' });
+        return;
+      }
+    }
 
     // Filter valid subtitles
     const validSubs = subtitles
@@ -456,16 +569,29 @@ export default function AdminPage() {
 
     const movieSlug = id.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
 
+    const validEpisodes = episodes.map((ep, idx) => ({
+      id: ep.id || `ep-${idx + 1}`,
+      episode_number: idx + 1,
+      title: ep.title?.trim() || `Episode ${idx + 1}`,
+      stream_url: ep.stream_url?.trim() || '',
+      duration: ep.duration?.trim() || '1h 00m',
+      subtitles: Array.isArray(ep.subtitles) ? ep.subtitles : [],
+    }));
+
+    const primaryStreamUrl = streamUrl.trim() || (validEpisodes[0] ? validEpisodes[0].stream_url : '');
+
     const payload = {
       id: movieSlug,
       title: title.trim(),
-      stream_url: streamUrl.trim(),
+      type: contentType,
+      episodes: contentType === 'series' ? validEpisodes : [],
+      stream_url: primaryStreamUrl,
       poster_url: posterUrl.trim(),
       backdrop_url: backdropUrl.trim(),
       description: description.trim(),
       genre: genre.trim(),
       release_year: parseInt(releaseYear, 10) || 2024,
-      duration: duration.trim(),
+      duration: contentType === 'series' ? `${validEpisodes.length} Episodes` : duration.trim(),
       rating: rating.trim(),
       is_featured: isFeatured,
       subtitles: validSubs,
@@ -901,11 +1027,22 @@ create policy "Allow service role full access"
                               <div>
                                 <div style={{ fontWeight: 700, color: '#fff' }}>{m.title}</div>
                                 <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>ID: {m.id}</div>
-                                {m.is_featured && (
-                                  <span className="badge badge-featured" style={{ fontSize: '0.65rem', padding: '2px 6px', marginTop: 4 }}>
-                                    Featured Hero
-                                  </span>
-                                )}
+                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+                                  {m.type === 'series' || (Array.isArray(m.episodes) && m.episodes.length > 0) ? (
+                                    <span className="badge badge-featured" style={{ fontSize: '0.65rem', padding: '2px 6px', background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
+                                      📺 Series ({m.episodes?.length || 0} Eps)
+                                    </span>
+                                  ) : (
+                                    <span className="badge badge-hd" style={{ fontSize: '0.65rem', padding: '2px 6px' }}>
+                                      🎬 Movie
+                                    </span>
+                                  )}
+                                  {m.is_featured && (
+                                    <span className="badge badge-featured" style={{ fontSize: '0.65rem', padding: '2px 6px' }}>
+                                      Featured Hero
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </td>
@@ -1120,14 +1257,95 @@ create policy "Allow service role full access"
           </div>
 
           <form onSubmit={handleSubmit}>
+            {/* Content Format Selector: Single Movie vs TV Series / Drama */}
+            <div style={{ marginBottom: 20 }}>
+              <label className="input-label" style={{ marginBottom: 8 }}>
+                Content Format *
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => setContentType('movie')}
+                  style={{
+                    padding: '14px 18px',
+                    borderRadius: 'var(--radius-md)',
+                    border: contentType === 'movie' ? '2px solid var(--primary)' : '1px solid var(--border)',
+                    background: contentType === 'movie' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: '0.15s ease'
+                  }}
+                  id="format-type-movie-btn"
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      background: contentType === 'movie' ? 'var(--primary)' : 'rgba(255,255,255,0.08)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#fff'
+                    }}>
+                      <Film size={20} />
+                    </div>
+                    <div>
+                      <strong style={{ display: 'block', fontSize: '0.96rem', color: '#fff' }}>🎬 Single Movie</strong>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Single stream feature film</span>
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setContentType('series');
+                    if (episodes.length === 0) addEpisode();
+                  }}
+                  style={{
+                    padding: '14px 18px',
+                    borderRadius: 'var(--radius-md)',
+                    border: contentType === 'series' ? '2px solid #818cf8' : '1px solid var(--border)',
+                    background: contentType === 'series' ? 'rgba(129, 140, 248, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: '0.15s ease'
+                  }}
+                  id="format-type-series-btn"
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      background: contentType === 'series' ? 'linear-gradient(135deg, #6366f1, #a855f7)' : 'rgba(255,255,255,0.08)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#fff'
+                    }}>
+                      <Tv size={20} />
+                    </div>
+                    <div>
+                      <strong style={{ display: 'block', fontSize: '0.96rem', color: '#fff' }}>📺 TV Series / Drama Playlist</strong>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Multi-episode playlist with auto-next</span>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+
             <div className="form-grid">
-              {/* Movie Title */}
+              {/* Content Title */}
               <div>
-                <label className="input-label">Movie Title *</label>
+                <label className="input-label">
+                  {contentType === 'series' ? 'Series / Drama Title *' : 'Movie Title *'}
+                </label>
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="e.g. Inception, Interstellar"
+                  placeholder={contentType === 'series' ? "e.g. Queen of Tears, Breaking Bad" : "e.g. Inception, Interstellar"}
                   value={title}
                   onChange={(e) => {
                     setTitle(e.target.value);
@@ -1140,13 +1358,13 @@ create policy "Allow service role full access"
                 />
               </div>
 
-              {/* Movie ID / Slug */}
+              {/* ID / Slug */}
               <div>
-                <label className="input-label">Movie ID / Slug * (URL-friendly)</label>
+                <label className="input-label">URL Slug / ID * (URL-friendly)</label>
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="e.g. interstellar-2014"
+                  placeholder={contentType === 'series' ? "e.g. queen-of-tears-2024" : "e.g. interstellar-2014"}
                   value={id}
                   onChange={(e) => setId(e.target.value)}
                   required
@@ -1155,95 +1373,288 @@ create policy "Allow service role full access"
                 />
               </div>
 
-              {/* Stream Source Mode Selector */}
-              <div className="form-group-full">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
-                  <label className="input-label" style={{ margin: 0 }}>
-                    Stream Source Mode *
-                  </label>
-                  <div style={{ display: 'flex', gap: 8, background: 'rgba(0,0,0,0.3)', padding: 4, borderRadius: 8, border: '1px solid var(--border)', flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      onClick={() => setSourceMode('youtube')}
-                      style={{
-                        padding: '6px 14px',
-                        borderRadius: 6,
-                        fontSize: '0.8rem',
-                        fontWeight: 600,
-                        background: sourceMode === 'youtube' ? '#ef4444' : 'transparent',
-                        color: sourceMode === 'youtube' ? '#fff' : 'var(--text-secondary)',
-                        border: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        cursor: 'pointer',
-                        transition: '0.15s ease'
-                      }}
-                    >
-                      <Play size={14} /> ▶️ YouTube (Unlisted • Zero Ads)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSourceMode('upload')}
-                      style={{
-                        padding: '6px 14px',
-                        borderRadius: 6,
-                        fontSize: '0.8rem',
-                        fontWeight: 600,
-                        background: sourceMode === 'upload' ? 'var(--primary)' : 'transparent',
-                        color: sourceMode === 'upload' ? '#fff' : 'var(--text-secondary)',
-                        border: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        cursor: 'pointer',
-                        transition: '0.15s ease'
-                      }}
-                    >
-                      <Upload size={14} /> ☁️ Supabase Upload
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSourceMode('gdrive')}
-                      style={{
-                        padding: '6px 14px',
-                        borderRadius: 6,
-                        fontSize: '0.8rem',
-                        fontWeight: 600,
-                        background: sourceMode === 'gdrive' ? 'var(--primary)' : 'transparent',
-                        color: sourceMode === 'gdrive' ? '#fff' : 'var(--text-secondary)',
-                        border: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        cursor: 'pointer',
-                        transition: '0.15s ease'
-                      }}
-                    >
-                      <Film size={14} /> 📁 Google Drive (5TB Account)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSourceMode('link')}
-                      style={{
-                        padding: '6px 14px',
-                        borderRadius: 6,
-                        fontSize: '0.8rem',
-                        fontWeight: 600,
-                        background: sourceMode === 'link' ? 'var(--primary)' : 'transparent',
-                        color: sourceMode === 'link' ? '#fff' : 'var(--text-secondary)',
-                        border: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        cursor: 'pointer',
-                        transition: '0.15s ease'
-                      }}
-                    >
-                      <ExternalLink size={14} /> 🔗 External Link / Embed
-                    </button>
+              {/* IF SERIES: TV Series & Drama Episodes Manager */}
+              {contentType === 'series' ? (
+                <div className="form-group-full">
+                  <div style={{
+                    background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(168, 85, 247, 0.06))',
+                    border: '1px solid rgba(99, 102, 241, 0.35)',
+                    borderRadius: 'var(--radius-lg)',
+                    padding: '24px',
+                    marginBottom: '10px'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Tv size={20} color="#a5b4fc" />
+                          <h3 style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0, color: '#fff' }}>
+                            Series Episodes Playlist ({episodes.length} Episodes)
+                          </h3>
+                        </div>
+                        <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                          Paste Google Drive links, YouTube links, or MP4 files for each episode. Auto-detects 1080p proxy streaming!
+                        </p>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          onClick={() => setShowBulkImporter(!showBulkImporter)}
+                          className="nav-btn nav-btn-primary"
+                          style={{ fontSize: '0.8rem', padding: '6px 14px', background: '#0284c7' }}
+                          id="btn-toggle-bulk-importer"
+                        >
+                          <Wand2 size={14} />
+                          <span>{showBulkImporter ? 'Hide Bulk Importer' : '⚡ Quick Bulk Links Importer'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={addEpisode}
+                          className="btn-add-sub"
+                          style={{ fontSize: '0.82rem', padding: '8px 14px' }}
+                          id="btn-add-episode"
+                        >
+                          <Plus size={15} /> Add Episode
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Bulk Links Importer Drawer */}
+                    {showBulkImporter && (
+                      <div style={{
+                        background: 'rgba(0, 0, 0, 0.6)',
+                        border: '1px solid rgba(56, 189, 248, 0.4)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '18px',
+                        marginBottom: '18px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+                          <strong style={{ fontSize: '0.88rem', color: '#38bdf8' }}>
+                            ⚡ Paste Episode Links (One link per line)
+                          </strong>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            Paste Google Drive share links, YouTube, or MP4 files
+                          </span>
+                        </div>
+                        <textarea
+                          rows={5}
+                          className="form-input"
+                          placeholder="https://drive.google.com/file/d/1wc90mCmm.../view?usp=sharing&#10;https://drive.google.com/file/d/1y7EQ24RA.../view?usp=sharing&#10;Episode 3 - The Truth | https://drive.google.com/file/d/...&#10;Episode 4 | https://youtu.be/..."
+                          value={bulkEpisodesText}
+                          onChange={(e) => setBulkEpisodesText(e.target.value)}
+                          style={{ fontFamily: 'monospace', fontSize: '0.82rem', marginBottom: 10 }}
+                          id="bulk-episodes-textarea"
+                        />
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                          <button
+                            type="button"
+                            onClick={() => setShowBulkImporter(false)}
+                            className="nav-btn nav-btn-ghost"
+                            style={{ fontSize: '0.78rem' }}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleBulkImportEpisodes}
+                            disabled={!bulkEpisodesText.trim()}
+                            className="nav-btn nav-btn-primary"
+                            style={{ fontSize: '0.78rem' }}
+                            id="btn-confirm-bulk-import"
+                          >
+                            <Check size={14} /> Auto-Generate Playlist
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Episodes List Items */}
+                    {episodes.length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '36px 20px', background: 'rgba(0,0,0,0.25)', borderRadius: 10, border: '1px dashed var(--border)' }}>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', marginBottom: 12 }}>
+                          No episodes added yet. Add Episode 1 or use the bulk importer above to paste all links at once!
+                        </p>
+                        <button type="button" onClick={addEpisode} className="nav-btn nav-btn-primary" style={{ fontSize: '0.82rem' }}>
+                          <Plus size={14} /> Add Episode 1
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {episodes.map((ep, idx) => (
+                          <div
+                            key={ep.id || idx}
+                            style={{
+                              background: 'rgba(7, 9, 14, 0.75)',
+                              border: '1px solid var(--border)',
+                              borderRadius: 'var(--radius-md)',
+                              padding: '12px 16px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 10,
+                              flexWrap: 'wrap'
+                            }}
+                          >
+                            <div style={{
+                              width: 32,
+                              height: 32,
+                              borderRadius: 8,
+                              background: 'rgba(99, 102, 241, 0.25)',
+                              color: '#a5b4fc',
+                              fontWeight: 700,
+                              fontSize: '0.85rem',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0
+                            }}>
+                              {idx + 1}
+                            </div>
+
+                            <input
+                              type="text"
+                              className="form-input"
+                              placeholder={`Episode ${idx + 1} Title`}
+                              value={ep.title}
+                              onChange={(e) => updateEpisode(idx, 'title', e.target.value)}
+                              style={{ width: 180, flexShrink: 0 }}
+                            />
+
+                            <input
+                              type="text"
+                              className="form-input"
+                              placeholder="Duration (1h 05m)"
+                              value={ep.duration}
+                              onChange={(e) => updateEpisode(idx, 'duration', e.target.value)}
+                              style={{ width: 120, flexShrink: 0 }}
+                            />
+
+                            <input
+                              type="text"
+                              className="form-input"
+                              placeholder="Google Drive link (1wc90...) or Video URL"
+                              value={ep.stream_url}
+                              onChange={(e) => updateEpisode(idx, 'stream_url', e.target.value)}
+                              style={{ flex: 1, minWidth: 200 }}
+                            />
+
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                              {ep.stream_url && (
+                                <button
+                                  type="button"
+                                  onClick={() => setTestStreamUrl(ep.stream_url)}
+                                  className="nav-btn nav-btn-ghost"
+                                  style={{ padding: '6px 10px', fontSize: '0.78rem' }}
+                                  title="Preview Episode Video"
+                                >
+                                  <Play size={13} />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => removeEpisode(idx)}
+                                className="btn-remove-sub"
+                                title="Delete Episode"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
+              ) : (
+                /* IF MOVIE: Stream Source Mode Selector */
+                <div className="form-group-full">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                    <label className="input-label" style={{ margin: 0 }}>
+                      Stream Source Mode *
+                    </label>
+                    <div style={{ display: 'flex', gap: 8, background: 'rgba(0,0,0,0.3)', padding: 4, borderRadius: 8, border: '1px solid var(--border)', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => setSourceMode('youtube')}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: 6,
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          background: sourceMode === 'youtube' ? '#ef4444' : 'transparent',
+                          color: sourceMode === 'youtube' ? '#fff' : 'var(--text-secondary)',
+                          border: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          cursor: 'pointer',
+                          transition: '0.15s ease'
+                        }}
+                      >
+                        <Play size={14} /> ▶️ YouTube (Unlisted • Zero Ads)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSourceMode('upload')}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: 6,
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          background: sourceMode === 'upload' ? 'var(--primary)' : 'transparent',
+                          color: sourceMode === 'upload' ? '#fff' : 'var(--text-secondary)',
+                          border: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          cursor: 'pointer',
+                          transition: '0.15s ease'
+                        }}
+                      >
+                        <Upload size={14} /> ☁️ Supabase Upload
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSourceMode('gdrive')}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: 6,
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          background: sourceMode === 'gdrive' ? 'var(--primary)' : 'transparent',
+                          color: sourceMode === 'gdrive' ? '#fff' : 'var(--text-secondary)',
+                          border: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          cursor: 'pointer',
+                          transition: '0.15s ease'
+                        }}
+                      >
+                        <Film size={14} /> 📁 Google Drive (5TB Account)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSourceMode('link')}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: 6,
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          background: sourceMode === 'link' ? 'var(--primary)' : 'transparent',
+                          color: sourceMode === 'link' ? '#fff' : 'var(--text-secondary)',
+                          border: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          cursor: 'pointer',
+                          transition: '0.15s ease'
+                        }}
+                      >
+                        <ExternalLink size={14} /> 🔗 External Link / Embed
+                      </button>
+                    </div>
+                  </div>
 
                 <input
                   type="file"
@@ -1567,8 +1978,9 @@ create policy "Allow service role full access"
                   </div>
                 )}
               </div>
+            )}
 
-              {/* Subtitles Management */}
+            {/* Subtitles Management */}
               <div className="form-group-full">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 10 }}>
                   <div>

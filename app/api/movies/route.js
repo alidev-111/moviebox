@@ -32,22 +32,27 @@ export async function POST(request) {
     }
 
     const body = await request.json();
-    const { id, title, stream_url, poster_url, backdrop_url, description, genre, release_year, duration, rating, subtitles, is_featured } = body;
+    const { id, title, stream_url, poster_url, backdrop_url, description, genre, release_year, duration, rating, subtitles, is_featured, type, episodes } = body;
 
-    if (!id || !title || !stream_url) {
-      return NextResponse.json({ error: 'Missing required fields: id, title, and stream_url are required' }, { status: 400 });
+    const isSeries = type === 'series' || (Array.isArray(episodes) && episodes.length > 0);
+    const validStream = (stream_url?.trim() || (isSeries && episodes?.[0]?.stream_url) || '').trim();
+
+    if (!id || !title || (!validStream && !isSeries)) {
+      return NextResponse.json({ error: 'Missing required fields: id, title, and stream_url (or episodes for a series) are required' }, { status: 400 });
     }
 
     const saved = await upsertMovie({
       id: id.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-'),
       title: title.trim(),
-      stream_url: stream_url.trim(),
+      type: isSeries ? 'series' : 'movie',
+      episodes: Array.isArray(episodes) ? episodes : [],
+      stream_url: validStream,
       poster_url: poster_url?.trim() || '',
       backdrop_url: backdrop_url?.trim() || '',
       description: description?.trim() || '',
-      genre: genre?.trim() || 'Action',
+      genre: genre?.trim() || (isSeries ? 'Drama' : 'Action'),
       release_year: release_year ? parseInt(release_year, 10) : new Date().getFullYear(),
-      duration: duration?.trim() || '2h 00m',
+      duration: duration?.trim() || (isSeries ? `${episodes?.length || 1} Episodes` : '2h 00m'),
       rating: rating?.trim() || 'HD',
       subtitles: Array.isArray(subtitles) ? subtitles : [],
       is_featured: Boolean(is_featured),

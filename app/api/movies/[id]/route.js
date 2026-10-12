@@ -37,6 +37,8 @@ export async function PUT(request, { params }) {
       ...body,
       id,
       title: body.title !== undefined ? body.title : existing?.title || 'Untitled',
+      type: body.type !== undefined ? body.type : existing?.type || (Array.isArray(body.episodes) && body.episodes.length > 0 ? 'series' : 'movie'),
+      episodes: body.episodes !== undefined ? body.episodes : existing?.episodes || [],
       stream_url: body.stream_url !== undefined ? body.stream_url : existing?.stream_url,
       subtitles: body.subtitles !== undefined ? body.subtitles : existing?.subtitles || [],
       poster_url: body.poster_url !== undefined ? body.poster_url : existing?.poster_url || '',
@@ -50,8 +52,9 @@ export async function PUT(request, { params }) {
       updated_at: new Date().toISOString(),
     };
 
-    if (!mergedData.stream_url) {
-      return NextResponse.json({ error: 'stream_url is required' }, { status: 400 });
+    const isSeries = mergedData.type === 'series' || (Array.isArray(mergedData.episodes) && mergedData.episodes.length > 0);
+    if (!mergedData.stream_url && (!isSeries || mergedData.episodes.length === 0)) {
+      return NextResponse.json({ error: 'stream_url or episodes are required' }, { status: 400 });
     }
 
     const saved = await upsertMovie(mergedData);
