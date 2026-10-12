@@ -718,6 +718,16 @@ export default function WatchPage() {
           }
         });
 
+        art.on('error', (err) => {
+          console.warn('[ArtPlayer Error]:', err);
+          if (art && art.notice) {
+            art.notice.show = 'Stream error or Google Drive quota limit. Switching to Embed player...';
+          }
+          setTimeout(() => {
+            setPlayerMode('embed');
+          }, 1500);
+        });
+
         playerInstanceRef.current = art;
         activeArt = art;
       } catch (e) {
@@ -832,9 +842,15 @@ export default function WatchPage() {
     ))
   );
 
-  // If a direct storage, YouTube, or Google Drive video is available, ALWAYS lock to cinema mode!
-  const activeMode = isDirectStorage
-    ? (youtubeId ? 'youtube' : 'native')
+  const isGoogleDrive = Boolean(
+    currentStreamUrl && (
+      currentStreamUrl.includes('drive.google.com') ||
+      currentStreamUrl.includes('/api/stream/gdrive')
+    )
+  );
+
+  const activeMode = youtubeId
+    ? 'youtube'
     : (playerMode === 'auto' ? (isDirectStream ? 'native' : 'embed') : playerMode);
 
   const tmdbMatch = currentStreamUrl?.match(/\/(movie|tv)\/(\d+)/) || currentStreamUrl?.match(/tmdb=(\d+)/);
@@ -1085,21 +1101,21 @@ export default function WatchPage() {
 
           <div className="player-controls-strip">
             {/* Direct Cinema Badge vs Player Switcher */}
-            {isDirectStorage ? (
+            {youtubeId ? (
               <div style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 7,
-                background: youtubeId ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                border: youtubeId ? '1px solid rgba(239, 68, 68, 0.35)' : '1px solid rgba(16, 185, 129, 0.35)',
+                background: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid rgba(239, 68, 68, 0.35)',
                 borderRadius: 'var(--radius-sm)',
                 padding: '6px 14px',
                 fontSize: '0.82rem',
                 fontWeight: 700,
-                color: youtubeId ? '#fca5a5' : '#86efac'
+                color: '#fca5a5'
               }}>
-                <CheckCircle2 size={15} color={youtubeId ? '#ef4444' : '#10b981'} />
-                <span>{youtubeId ? '⚡ 1080p Ad-Free YouTube Cinema Stream (Zero Ads)' : '⚡ 1080p Ad-Free Cinema Stream (Zero Ads)'}</span>
+                <CheckCircle2 size={15} color="#ef4444" />
+                <span>⚡ 1080p Ad-Free YouTube Cinema Stream (Zero Ads)</span>
               </div>
             ) : (
               <div style={{ display: 'inline-flex', background: 'rgba(255,255,255,0.06)', borderRadius: 'var(--radius-sm)', padding: 3, border: '1px solid var(--border)' }}>
@@ -1132,10 +1148,10 @@ export default function WatchPage() {
                     background: (activeMode === 'embed' || !isDirectStream) ? 'var(--primary)' : 'transparent',
                     transition: '0.15s ease'
                   }}
-                  title="Web Embed Player (Multi-server fallback)"
+                  title={isGoogleDrive ? 'Google Drive Web Embed / Mirror Player' : 'Web Embed Player (Multi-server fallback)'}
                   id="btn-embed-player"
                 >
-                  🌐 Web Embed Player
+                  {isGoogleDrive ? '🌐 Google Drive Embed / Mirror' : '🌐 Web Embed Player'}
                 </button>
               </div>
             )}
@@ -1152,8 +1168,8 @@ export default function WatchPage() {
           </div>
         </div>
 
-        {/* Server Switcher (ONLY for third-party embeds, NEVER shown for direct storage / Google Drive videos) */}
-        {!isDirectStorage && activeMode === 'embed' && currentTmdbId && (
+        {/* Server Switcher (Available when in Embed mode and movie has TMDB record) */}
+        {activeMode === 'embed' && currentTmdbId && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
               Stream Server:

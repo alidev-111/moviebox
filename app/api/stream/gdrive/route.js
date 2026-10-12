@@ -145,6 +145,44 @@ export async function GET(request) {
       });
     }
 
+    const finalContentType = streamRes.headers.get('content-type') || '';
+    if (finalContentType.includes('text/html')) {
+      const htmlText = await streamRes.text();
+      const isQuota = htmlText.includes('Too many users') || htmlText.includes('quota') || htmlText.includes('24 hours');
+      const isNotFound = htmlText.includes('Error 404') || htmlText.includes('Page not found') || streamRes.status === 404;
+
+      if (isQuota) {
+        return NextResponse.json(
+          {
+            error: 'Google Drive 24-Hour Quota Exceeded: Google has temporarily locked this file for 24 hours due to high downloads. Quick Fix: Right-click the file in Google Drive -> "Make a copy" to generate a new link with 0 quota, or use YouTube Unlisted.',
+            code: 'GDRIVE_QUOTA_EXCEEDED',
+            fileId,
+          },
+          { status: 429 }
+        );
+      }
+
+      if (isNotFound) {
+        return NextResponse.json(
+          {
+            error: 'Google Drive File Not Found (HTTP 404). Please verify the link sharing is set to "Anyone with the link can view".',
+            code: 'GDRIVE_NOT_FOUND',
+            fileId,
+          },
+          { status: 404 }
+        );
+      }
+
+      return NextResponse.json(
+        {
+          error: 'Google Drive returned an HTML page instead of video. Please verify sharing permissions.',
+          code: 'GDRIVE_HTML_RESPONSE',
+          fileId,
+        },
+        { status: 400 }
+      );
+    }
+
     if (!streamRes.ok && streamRes.status !== 206) {
       return NextResponse.json(
         {
