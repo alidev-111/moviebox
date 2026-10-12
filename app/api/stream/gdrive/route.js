@@ -33,17 +33,6 @@ async function resolveDriveSession(fileId) {
 
   const resolutionPromise = (async () => {
     try {
-      const apiKey = process.env.GOOGLE_DRIVE_API_KEY;
-      if (apiKey) {
-        const session = {
-          downloadUrl: `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${apiKey}`,
-          cookieHeader: '',
-          isApi: true,
-          expiresAt: now + 3600 * 1000 * 6, // 6 hours
-        };
-        sessionCache.set(fileId, session);
-        return session;
-      }
 
       // Gateway session resolver with cookie preservation
       const gatewayUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download`;
