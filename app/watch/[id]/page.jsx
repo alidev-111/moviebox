@@ -47,6 +47,23 @@ function isHostedVideoFile(url) {
     url.endsWith('.webm');
 }
 
+// "Auto Fill in Fullscreen" player preference, remembered per browser (on by default)
+const AUTO_FILL_KEY = 'watchbox_auto_fill';
+
+function getAutoFillPref() {
+  try {
+    return localStorage.getItem(AUTO_FILL_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+}
+
+function saveAutoFillPref(on) {
+  try {
+    localStorage.setItem(AUTO_FILL_KEY, on ? 'on' : 'off');
+  } catch { }
+}
+
 export default function WatchPage() {
   const params = useParams();
   const router = useRouter();
@@ -588,6 +605,14 @@ export default function WatchPage() {
       const isHls = streamToPlay?.includes('.m3u8') || streamToPlay?.includes('m3u8');
 
       try {
+        const autoFillOn = getAutoFillPref();
+
+        // Used by Auto Fill and fullscreen changes; keeps the Fill Screen switch in sync
+        const setFillScreen = (fill) => {
+          art.video.style.objectFit = fill ? 'cover' : '';
+          art.setting.update({ name: 'fill-screen', switch: fill, tooltip: fill ? 'On' : 'Off' });
+        };
+
         const artOptions = {
           container: artRef.current,
           url: streamToPlay,
@@ -616,7 +641,7 @@ export default function WatchPage() {
           plugins: [cinemaDoubleTapPlugin],
           settings: [
             {
-              // Zoom to fill wide phone screens in fullscreen (crops the edges, removes black bars)
+              // Zoom to fill wide screens (crops the edges, removes black bars)
               name: 'fill-screen',
               html: 'Fill Screen',
               tooltip: 'Off',
@@ -626,6 +651,20 @@ export default function WatchPage() {
                 art.video.style.objectFit = fill ? 'cover' : '';
                 item.tooltip = fill ? 'On' : 'Off';
                 return fill;
+              },
+            },
+            {
+              // Remembered preference: turn Fill Screen on automatically when entering fullscreen
+              name: 'auto-fill',
+              html: 'Auto Fill in Fullscreen',
+              tooltip: autoFillOn ? 'On' : 'Off',
+              switch: autoFillOn,
+              onSwitch: function (item) {
+                const on = !item.switch;
+                saveAutoFillPref(on);
+                item.tooltip = on ? 'On' : 'Off';
+                if (art.fullscreen) setFillScreen(on);
+                return on;
               },
             },
           ],
@@ -743,11 +782,10 @@ export default function WatchPage() {
           }
         });
 
-        // Phones: fullscreen turns to landscape and fills the screen (Fill Screen in settings can switch it off)
+        // Fullscreen: Auto Fill turns Fill Screen on (and off again on exit); phones also turn to landscape
         art.on('fullscreen', (isFullscreen) => {
+          if (getAutoFillPref()) setFillScreen(isFullscreen);
           if (!ArtplayerConstructor.utils.isMobile) return;
-          art.video.style.objectFit = isFullscreen ? 'cover' : '';
-          art.setting.update({ name: 'fill-screen', switch: isFullscreen, tooltip: isFullscreen ? 'On' : 'Off' });
           try {
             if (isFullscreen && screen.orientation?.lock) {
               screen.orientation.lock('landscape').catch(() => {});
