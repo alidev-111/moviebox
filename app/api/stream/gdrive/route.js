@@ -3,11 +3,96 @@ import { NextResponse } from 'next/server';
 /**
  * High-Performance Google Drive Video Stream Proxy
  * Streams 1080p video directly from Google Drive 5TB accounts with:
- * 1. Automatic Google virus-scan bypass (dynamic uuid & confirmation token extraction)
- * 2. HTTP 206 Partial Content / Range requests (essential for video scrubbing/seeking in Artplayer)
- * 3. Instant playback even when Google's web player says "video file is still being processed"
- * 4. Zero ads, zero popups, zero token expiration
+ * 1. Global in-memory session cache with single-flight resolution locking
+ * 2. Proper Google Set-Cookie & NID preservation (prevents 403 / "quota exceeded" errors)
+ * 3. HTTP 206 Partial Content / Range requests (essential for instant seeking in Artplayer)
+ * 4. Automatic cache invalidation on token expiration
+ * 5. Optional Google Drive API Key support (alt=media)
+ * 6. Zero ads, zero popups, zero YouTube awkwardness
  */
+
+// In-memory session cache: Map<fileId, { downloadUrl: string, cookieHeader: string, expiresAt: number }>
+const sessionCache = new Map();
+
+// In-flight resolution lock: Map<fileId, Promise<Session>>
+const pendingResolutions = new Map();
+
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+async function resolveDriveSession(fileId) {
+  const now = Date.now();
+  const cached = sessionCache.get(fileId);
+  if (cached && cached.expiresAt > now) {
+    return cached;
+  }
+
+  // Check if a resolution for this fileId is already in flight to avoid duplicate requests
+  if (pendingResolutions.has(fileId)) {
+    return pendingResolutions.get(fileId);
+  }
+
+  const resolutionPromise = (async () => {
+    try {
+      const apiKey = process.env.GOOGLE_DRIVE_API_KEY;
+      if (apiKey) {
+        const session = {
+          downloadUrl: `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${apiKey}`,
+          cookieHeader: '',
+          isApi: true,
+          expiresAt: now + 3600 * 1000 * 6, // 6 hours
+        };
+        sessionCache.set(fileId, session);
+        return session;
+      }
+
+      // Gateway session resolver with cookie preservation
+      const gatewayUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download`;
+      const probeRes = await fetch(gatewayUrl, {
+        headers: { 'User-Agent': USER_AGENT },
+        signal: AbortSignal.timeout(8000),
+      });
+
+      // Extract cookies from probe
+      let cookieHeader = '';
+      if (typeof probeRes.headers.getSetCookie === 'function') {
+        const rawCookies = probeRes.headers.getSetCookie();
+        cookieHeader = rawCookies.map(c => c.split(';')[0]).join('; ');
+      } else {
+        const raw = probeRes.headers.get('set-cookie');
+        if (raw) cookieHeader = raw.split(';')[0];
+      }
+
+      let downloadUrl = gatewayUrl;
+      const contentType = probeRes.headers.get('content-type') || '';
+
+      if (contentType.includes('text/html')) {
+        const html = await probeRes.text();
+        const uuidMatch = html.match(/name="uuid"\s+value="([^"]+)"/);
+        const confirmMatch = html.match(/name="confirm"\s+value="([^"]+)"/);
+
+        const uuid = uuidMatch ? uuidMatch[1] : '';
+        const confirm = confirmMatch ? confirmMatch[1] : 't';
+
+        downloadUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=${confirm}${uuid ? `&uuid=${uuid}` : ''}`;
+      }
+
+      const session = {
+        downloadUrl,
+        cookieHeader,
+        isApi: false,
+        expiresAt: now + 3600 * 1000 * 2, // 2 hours
+      };
+
+      sessionCache.set(fileId, session);
+      return session;
+    } finally {
+      pendingResolutions.delete(fileId);
+    }
+  })();
+
+  pendingResolutions.set(fileId, resolutionPromise);
+  return resolutionPromise;
+}
 
 export async function GET(request) {
   try {
@@ -29,55 +114,47 @@ export async function GET(request) {
     }
 
     const rangeHeader = request.headers.get('range');
-    const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
-    // Step 1: Query download gateway to retrieve dynamic uuid and confirm tokens for virus warning bypass
-    const gatewayUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download`;
-    
-    let targetDownloadUrl = gatewayUrl;
-    try {
-      const checkRes = await fetch(gatewayUrl, {
-        headers: { 'User-Agent': userAgent },
-        signal: AbortSignal.timeout(6000),
-      });
+    // Step 1: Resolve authenticated stream session (using cached tokens & cookies)
+    let session = await resolveDriveSession(fileId);
 
-      if (checkRes.ok) {
-        const contentType = checkRes.headers.get('content-type') || '';
-        // If Google returned the virus warning HTML page, extract form tokens
-        if (contentType.includes('text/html')) {
-          const html = await checkRes.text();
-          const uuidMatch = html.match(/name="uuid"\s+value="([^"]+)"/);
-          const confirmMatch = html.match(/name="confirm"\s+value="([^"]+)"/);
-
-          const uuid = uuidMatch ? uuidMatch[1] : '';
-          const confirm = confirmMatch ? confirmMatch[1] : 't';
-
-          targetDownloadUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=${confirm}`;
-          if (uuid) {
-            targetDownloadUrl += `&uuid=${uuid}`;
-          }
-        } else if (checkRes.status === 200 || checkRes.status === 206) {
-          // Direct file stream already returned
-          targetDownloadUrl = gatewayUrl;
-        }
-      }
-    } catch (checkErr) {
-      console.warn('[GDrive Stream] Token probe warning:', checkErr.message);
-      targetDownloadUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`;
-    }
-
-    // Step 2: Fetch stream from Google's CDN with the client's Range header
+    // Step 2: Fetch stream chunk with client Range header
     const streamHeaders = {
-      'User-Agent': userAgent,
+      'User-Agent': USER_AGENT,
     };
+    if (session.cookieHeader) {
+      streamHeaders['Cookie'] = session.cookieHeader;
+    }
     if (rangeHeader) {
       streamHeaders['Range'] = rangeHeader;
     }
 
-    const streamRes = await fetch(targetDownloadUrl, {
+    let streamRes = await fetch(session.downloadUrl, {
       headers: streamHeaders,
       redirect: 'follow',
     });
+
+    // Step 3: If session expired on Google's side (e.g. 403 or HTML returned), invalidate cache & retry once
+    const resContentType = streamRes.headers.get('content-type') || '';
+    if ((streamRes.status === 403 || streamRes.status === 401 || resContentType.includes('text/html')) && !session.isApi) {
+      sessionCache.delete(fileId);
+      session = await resolveDriveSession(fileId);
+
+      const retryHeaders = {
+        'User-Agent': USER_AGENT,
+      };
+      if (session.cookieHeader) {
+        retryHeaders['Cookie'] = session.cookieHeader;
+      }
+      if (rangeHeader) {
+        retryHeaders['Range'] = rangeHeader;
+      }
+
+      streamRes = await fetch(session.downloadUrl, {
+        headers: retryHeaders,
+        redirect: 'follow',
+      });
+    }
 
     if (!streamRes.ok && streamRes.status !== 206) {
       return NextResponse.json(
@@ -88,13 +165,14 @@ export async function GET(request) {
       );
     }
 
-    // Step 3: Stream back video chunks to browser with Range support
+    // Step 4: Stream video chunks with HTTP 206 Partial Content headers to browser
     const resHeaders = new Headers();
     resHeaders.set('Content-Type', streamRes.headers.get('content-type') || 'video/mp4');
     resHeaders.set('Accept-Ranges', 'bytes');
     resHeaders.set('Access-Control-Allow-Origin', '*');
     resHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-    resHeaders.set('Cache-Control', 'public, max-age=7200');
+    resHeaders.set('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
+    resHeaders.set('Cache-Control', 'public, max-age=3600');
 
     if (streamRes.headers.get('content-range')) {
       resHeaders.set('Content-Range', streamRes.headers.get('content-range'));
@@ -120,6 +198,20 @@ export async function HEAD(request) {
       'Accept-Ranges': 'bytes',
       'Content-Type': 'video/mp4',
       'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges',
+    },
+  });
+}
+
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      'Access-Control-Allow-Headers': 'Range, Content-Type, Authorization',
+      'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges',
     },
   });
 }
