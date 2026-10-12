@@ -614,6 +614,20 @@ export default function WatchPage() {
           theme: '#6366f1',
           lang: 'en',
           plugins: [cinemaDoubleTapPlugin],
+          settings: [
+            {
+              // Zoom to fill wide phone screens in fullscreen (crops the edges, removes black bars)
+              html: 'Fill Screen',
+              tooltip: 'Off',
+              switch: false,
+              onSwitch: function (item) {
+                const fill = !item.switch;
+                art.video.style.objectFit = fill ? 'cover' : '';
+                item.tooltip = fill ? 'On' : 'Off';
+                return fill;
+              },
+            },
+          ],
           customType: {
             m3u8: function (video, url) {
               if (HlsConstructor && HlsConstructor.isSupported()) {

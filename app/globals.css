@@ -1283,7 +1283,7 @@ input, textarea, select {
 
 .episodes-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(290px, 100%), 1fr));
   gap: 12px;
   max-height: 480px;
   overflow-y: auto;
@@ -1377,6 +1377,7 @@ input, textarea, select {
 }
 
 .ep-card-title {
+  min-width: 0;
   font-size: 0.92rem;
   font-weight: 600;
   color: #fff;
@@ -1653,13 +1654,7 @@ input, textarea, select {
   }
   .subtitles-pill-bar {
     padding: 8px 10px;
-    overflow-x: auto;
-    flex-wrap: nowrap;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-  }
-  .subtitles-pill-bar::-webkit-scrollbar {
-    display: none;
+    gap: 8px;
   }
   .sub-pill {
     white-space: nowrap;
@@ -1681,8 +1676,15 @@ input, textarea, select {
     font-size: 1.1rem;
   }
   .episodes-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     max-height: 380px;
+  }
+
+  /* Player controls: hide extras so settings + fullscreen fit on a phone-width control bar */
+  .art-video-player .art-control-screenshot,
+  .art-video-player .art-control-pip,
+  .art-video-player .art-control-fullscreenWeb {
+    display: none !important;
   }
 
   /* Admin panel on phone */
