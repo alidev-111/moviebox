@@ -105,10 +105,14 @@ export default function AdminPage() {
       let finalVal = value;
       if (field === 'stream_url' && typeof value === 'string') {
         const trimmed = value.trim();
-        const match = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
-                      trimmed.match(/id=([a-zA-Z0-9_-]+)/);
-        if (match) {
-          finalVal = `/api/stream/gdrive?id=${match[1]}`;
+        const gdriveMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+                            trimmed.match(/id=([a-zA-Z0-9_-]+)/);
+        const okMatch = trimmed.match(/ok\.ru\/(?:video|videoembed)\/(\d+)/);
+
+        if (gdriveMatch && !trimmed.startsWith('/api/stream/gdrive')) {
+          finalVal = `/api/stream/gdrive?id=${gdriveMatch[1]}`;
+        } else if (okMatch) {
+          finalVal = `https://ok.ru/videoembed/${okMatch[1]}`;
         }
       }
       updated[idx] = { ...updated[idx], [field]: finalVal };
@@ -129,10 +133,14 @@ export default function AdminPage() {
         url = parts[1].trim();
       }
 
-      const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
-                    url.match(/id=([a-zA-Z0-9_-]+)/);
-      if (match) {
-        url = `/api/stream/gdrive?id=${match[1]}`;
+      const gdriveMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+                          url.match(/id=([a-zA-Z0-9_-]+)/);
+      const okMatch = url.match(/ok\.ru\/(?:video|videoembed)\/(\d+)/);
+
+      if (gdriveMatch && !url.startsWith('/api/stream/gdrive')) {
+        url = `/api/stream/gdrive?id=${gdriveMatch[1]}`;
+      } else if (okMatch) {
+        url = `https://ok.ru/videoembed/${okMatch[1]}`;
       }
 
       return {
@@ -1922,9 +1930,17 @@ create policy "Allow service role full access"
                     <input
                       type="url"
                       className="form-input"
-                      placeholder="https://vidlink.pro/movie/969681 or external .m3u8 stream link"
+                      placeholder="https://ok.ru/video/123456789 or https://vidlink.pro/movie/969681"
                       value={streamUrl}
-                      onChange={(e) => setStreamUrl(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value.trim();
+                        const okMatch = val.match(/ok\.ru\/(?:video|videoembed)\/(\d+)/);
+                        if (okMatch) {
+                          setStreamUrl(`https://ok.ru/videoembed/${okMatch[1]}`);
+                        } else {
+                          setStreamUrl(e.target.value);
+                        }
+                      }}
                       required={sourceMode === 'link'}
                       id="form-stream-url"
                     />

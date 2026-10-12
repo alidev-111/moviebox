@@ -864,6 +864,26 @@ export default function WatchPage() {
         return `https://drive.google.com/file/d/${gdriveMatch[1]}/preview`;
       }
     }
+
+    // Direct OK.ru embed normalization (supports ok.ru/video/ID and ok.ru/videoembed/ID)
+    if (currentStreamUrl && currentStreamUrl.includes('ok.ru')) {
+      const okMatch = currentStreamUrl.match(/ok\.ru\/(?:video|videoembed)\/(\d+)/);
+      if (okMatch) {
+        return `https://ok.ru/videoembed/${okMatch[1]}`;
+      }
+      return currentStreamUrl;
+    }
+
+    // Direct VK, Streamtape, DoodStream, or custom embed URLs
+    if (currentStreamUrl && (
+      currentStreamUrl.includes('vk.com') ||
+      currentStreamUrl.includes('streamtape') ||
+      currentStreamUrl.includes('dood') ||
+      currentStreamUrl.includes('mixdrop') ||
+      (!currentStreamUrl.includes('tmdb') && !currentStreamUrl.match(/\/(movie|tv)\/\d+/))
+    )) {
+      return currentStreamUrl;
+    }
     if (!currentTmdbId) return currentStreamUrl;
     if (isSeries) {
       if (selectedServer === 1) return `https://vidlink.pro/tv/${currentTmdbId}/1/${epNumber}?primaryColor=6366f1&secondaryColor=4f46e5&icons=vid`;
