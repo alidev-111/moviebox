@@ -37,6 +37,16 @@ export function getYouTubeId(url) {
   return null;
 }
 
+// Videos in our own storage (Backblaze, Supabase) or plain .mp4/.webm links have no embed mirror,
+// so they always play in ArtPlayer ("embed" would only show the raw file in the browser's bare player)
+function isHostedVideoFile(url) {
+  if (!url || typeof url !== 'string') return false;
+  return url.startsWith('/api/stream/b2/') ||
+    url.includes('supabase.co') ||
+    url.endsWith('.mp4') ||
+    url.endsWith('.webm');
+}
+
 export default function WatchPage() {
   const params = useParams();
   const router = useRouter();
@@ -720,6 +730,12 @@ export default function WatchPage() {
 
         art.on('error', (err) => {
           console.warn('[ArtPlayer Error]:', err);
+          if (isHostedVideoFile(streamToPlay)) {
+            if (art.notice) {
+              art.notice.show = 'Video could not be loaded. Check the file link, and that it is an MP4 (H.264 video, AAC audio).';
+            }
+            return;
+          }
           if (art && art.notice) {
             art.notice.show = 'Stream error or Google Drive quota limit. Switching to Embed player...';
           }
@@ -849,8 +865,12 @@ export default function WatchPage() {
     )
   );
 
+  const isHostedFile = !youtubeId && isHostedVideoFile(currentStreamUrl);
+
   const activeMode = youtubeId
     ? 'youtube'
+    : isHostedFile
+    ? 'native'
     : (playerMode === 'auto' ? (isDirectStream ? 'native' : 'embed') : playerMode);
 
   const tmdbMatch = currentStreamUrl?.match(/\/(movie|tv)\/(\d+)/) || currentStreamUrl?.match(/tmdb=(\d+)/);
@@ -1158,23 +1178,25 @@ export default function WatchPage() {
                     ⚡ HD Native (Zero Ads)
                   </button>
                 )}
-                <button
-                  onClick={() => setPlayerMode('embed')}
-                  style={{
-                    padding: '5px 10px',
-                    borderRadius: 6,
-                    fontSize: '0.75rem',
-                    fontWeight: 600,
-                    color: (activeMode === 'embed' || !isDirectStream) ? '#fff' : 'var(--text-secondary)',
-                    background: (activeMode === 'embed' || !isDirectStream) ? 'var(--primary)' : 'transparent',
-                    transition: '0.15s ease',
-                    whiteSpace: 'nowrap'
-                  }}
-                  title={isGoogleDrive ? 'Google Drive Web Embed / Mirror Player' : 'Web Embed Player (Multi-server fallback)'}
-                  id="btn-embed-player"
-                >
-                  {isGoogleDrive ? '🌐 Drive Mirror' : '🌐 Embed Player'}
-                </button>
+                {!isHostedFile && (
+                  <button
+                    onClick={() => setPlayerMode('embed')}
+                    style={{
+                      padding: '5px 10px',
+                      borderRadius: 6,
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      color: (activeMode === 'embed' || !isDirectStream) ? '#fff' : 'var(--text-secondary)',
+                      background: (activeMode === 'embed' || !isDirectStream) ? 'var(--primary)' : 'transparent',
+                      transition: '0.15s ease',
+                      whiteSpace: 'nowrap'
+                    }}
+                    title={isGoogleDrive ? 'Google Drive Web Embed / Mirror Player' : 'Web Embed Player (Multi-server fallback)'}
+                    id="btn-embed-player"
+                  >
+                    {isGoogleDrive ? '🌐 Drive Mirror' : '🌐 Embed Player'}
+                  </button>
+                )}
               </div>
             )}
 
