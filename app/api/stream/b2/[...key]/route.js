@@ -20,7 +20,11 @@ export async function GET(request) {
   const { pathname } = new URL(request.url);
   let segments;
   try {
-    segments = pathname.slice(ROUTE_PREFIX.length).split('/').map(decodeURIComponent);
+    // Backblaze friendly URLs write spaces as "+" (a real "+" is "%2B")
+    segments = pathname
+      .slice(ROUTE_PREFIX.length)
+      .split('/')
+      .map((s) => decodeURIComponent(s.replace(/\+/g, ' ')));
   } catch {
     return NextResponse.json({ error: 'Invalid file path' }, { status: 400 });
   }
