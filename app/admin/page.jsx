@@ -39,6 +39,15 @@ function getYouTubeId(url) {
   return null;
 }
 
+// Backblaze B2 file links (friendly or S3 style) play through /api/stream/b2, which signs them for the private bucket
+function toB2StreamPath(url) {
+  if (!url || typeof url !== 'string') return url;
+  const match = url.match(/backblazeb2\.com\/file\/[^/]+\/([^?#]+)/) ||
+                url.match(/\/\/[^/]+\.s3\.[^/]+\.backblazeb2\.com\/([^?#]+)/) ||
+                url.match(/\/\/s3\.[^/]+\.backblazeb2\.com\/[^/]+\/([^?#]+)/);
+  return match ? `/api/stream/b2/${match[1]}` : url;
+}
+
 export default function AdminPage() {
   const [adminKey, setAdminKey] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -581,12 +590,12 @@ export default function AdminPage() {
       id: ep.id || `ep-${idx + 1}`,
       episode_number: idx + 1,
       title: ep.title?.trim() || `Episode ${idx + 1}`,
-      stream_url: ep.stream_url?.trim() || '',
+      stream_url: toB2StreamPath(ep.stream_url?.trim() || ''),
       duration: ep.duration?.trim() || '1h 00m',
       subtitles: Array.isArray(ep.subtitles) ? ep.subtitles : [],
     }));
 
-    const primaryStreamUrl = streamUrl.trim() || (validEpisodes[0] ? validEpisodes[0].stream_url : '');
+    const primaryStreamUrl = toB2StreamPath(streamUrl.trim()) || (validEpisodes[0] ? validEpisodes[0].stream_url : '');
 
     const payload = {
       id: movieSlug,
