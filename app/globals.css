@@ -1605,11 +1605,36 @@ input, textarea, select {
 
   /* Watch Page Cinema Player on Phone */
   .watch-container {
-    padding: 10px 8px;
+    padding: 8px 6px;
+  }
+  .watch-topbar {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .player-controls-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    width: 100%;
+  }
+  .player-controls-strip > div {
+    display: flex;
+    flex: 1;
+  }
+  .player-controls-strip > div button {
+    flex: 1;
+    text-align: center;
+    justify-content: center;
   }
   .player-wrapper {
     border-radius: 8px;
     margin-bottom: 10px;
+    width: 100%;
+    aspect-ratio: 16 / 9;
   }
   .series-ep-nav-bar {
     padding: 8px 10px;

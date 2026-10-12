@@ -1143,35 +1143,37 @@ export default function WatchPage() {
                   <button
                     onClick={() => setPlayerMode('native')}
                     style={{
-                      padding: '5px 12px',
+                      padding: '5px 10px',
                       borderRadius: 6,
-                      fontSize: '0.78rem',
+                      fontSize: '0.75rem',
                       fontWeight: 600,
                       color: activeMode === 'native' ? '#fff' : 'var(--text-secondary)',
                       background: activeMode === 'native' ? 'var(--primary)' : 'transparent',
-                      transition: '0.15s ease'
+                      transition: '0.15s ease',
+                      whiteSpace: 'nowrap'
                     }}
                     title="HD Native player (Pure HTML5 ArtPlayer, Zero Ads)"
                     id="btn-native-player"
                   >
-                    ⚡ HD Native Player (Zero Ads)
+                    ⚡ HD Native (Zero Ads)
                   </button>
                 )}
                 <button
                   onClick={() => setPlayerMode('embed')}
                   style={{
-                    padding: '5px 12px',
+                    padding: '5px 10px',
                     borderRadius: 6,
-                    fontSize: '0.78rem',
+                    fontSize: '0.75rem',
                     fontWeight: 600,
                     color: (activeMode === 'embed' || !isDirectStream) ? '#fff' : 'var(--text-secondary)',
                     background: (activeMode === 'embed' || !isDirectStream) ? 'var(--primary)' : 'transparent',
-                    transition: '0.15s ease'
+                    transition: '0.15s ease',
+                    whiteSpace: 'nowrap'
                   }}
                   title={isGoogleDrive ? 'Google Drive Web Embed / Mirror Player' : 'Web Embed Player (Multi-server fallback)'}
                   id="btn-embed-player"
                 >
-                  {isGoogleDrive ? '🌐 Google Drive Embed / Mirror' : '🌐 Web Embed Player'}
+                  {isGoogleDrive ? '🌐 Drive Mirror' : '🌐 Embed Player'}
                 </button>
               </div>
             )}
