@@ -617,6 +617,7 @@ export default function WatchPage() {
           settings: [
             {
               // Zoom to fill wide phone screens in fullscreen (crops the edges, removes black bars)
+              name: 'fill-screen',
               html: 'Fill Screen',
               tooltip: 'Off',
               switch: false,
@@ -739,6 +740,22 @@ export default function WatchPage() {
             setTimeout(() => {
               switchEpisode(currentEpIndex + 1);
             }, 1200);
+          }
+        });
+
+        // Phones: fullscreen turns to landscape and fills the screen (Fill Screen in settings can switch it off)
+        art.on('fullscreen', (isFullscreen) => {
+          if (!ArtplayerConstructor.utils.isMobile) return;
+          art.video.style.objectFit = isFullscreen ? 'cover' : '';
+          art.setting.update({ name: 'fill-screen', switch: isFullscreen, tooltip: isFullscreen ? 'On' : 'Off' });
+          try {
+            if (isFullscreen && screen.orientation?.lock) {
+              screen.orientation.lock('landscape').catch(() => {});
+            } else if (!isFullscreen && screen.orientation?.unlock) {
+              screen.orientation.unlock();
+            }
+          } catch {
+            // Orientation lock isn't supported everywhere (e.g. iOS Safari)
           }
         });
 
