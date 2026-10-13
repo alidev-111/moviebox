@@ -13,6 +13,8 @@ import {
   AlertTriangle,
   Play,
   Subtitles,
+  ChevronDown,
+  ChevronUp,
   Database,
   Film,
   Key,
@@ -108,13 +110,17 @@ export default function AdminPage() {
       if (field === 'stream_url' && typeof value === 'string') {
         const trimmed = value.trim();
         const gdriveMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
-                            trimmed.match(/id=([a-zA-Z0-9_-]+)/);
+          trimmed.match(/id=([a-zA-Z0-9_-]+)/);
         const okMatch = trimmed.match(/ok\.ru\/(?:video|videoembed)\/(\d+)/);
+        const b2Match = trimmed.match(/backblazeb2\.com\/file\/([^/]+)\/([^?#]+)/) ||
+          trimmed.match(/s3\.[^/]+\.backblazeb2\.com\/([^/]+)\/([^?#]+)/);
 
         if (gdriveMatch && !trimmed.startsWith('/api/stream/gdrive')) {
           finalVal = `/api/stream/gdrive?id=${gdriveMatch[1]}`;
         } else if (okMatch) {
           finalVal = `https://ok.ru/videoembed/${okMatch[1]}`;
+        } else if (b2Match && !trimmed.startsWith('/api/stream/b2')) {
+          finalVal = `/api/stream/b2/${b2Match[1]}/${b2Match[2]}`;
         }
       }
       updated[idx] = { ...updated[idx], [field]: finalVal };
@@ -136,13 +142,17 @@ export default function AdminPage() {
       }
 
       const gdriveMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
-                          url.match(/id=([a-zA-Z0-9_-]+)/);
+        url.match(/id=([a-zA-Z0-9_-]+)/);
       const okMatch = url.match(/ok\.ru\/(?:video|videoembed)\/(\d+)/);
+      const b2Match = url.match(/backblazeb2\.com\/file\/([^/]+)\/([^?#]+)/) ||
+        url.match(/s3\.[^/]+\.backblazeb2\.com\/([^/]+)\/([^?#]+)/);
 
       if (gdriveMatch && !url.startsWith('/api/stream/gdrive')) {
         url = `/api/stream/gdrive?id=${gdriveMatch[1]}`;
       } else if (okMatch) {
         url = `https://ok.ru/videoembed/${okMatch[1]}`;
+      } else if (b2Match && !url.startsWith('/api/stream/b2')) {
+        url = `/api/stream/b2/${b2Match[1]}/${b2Match[2]}`;
       }
 
       return {
@@ -206,9 +216,12 @@ export default function AdminPage() {
   const videoInputRef = useRef(null);
   const subInputRef = useRef(null);
   const subUploadTargetRef = useRef(null);
+  const subUploadEpisodeRef = useRef(null);
   const [subUploadIndex, setSubUploadIndex] = useState(null);
   const [subSearchId, setSubSearchId] = useState('');
   const [subSearching, setSubSearching] = useState(false);
+  const [activeSubtitleTab, setActiveSubtitleTab] = useState('ep-0');
+  const [expandedEpisodeSubs, setExpandedEpisodeSubs] = useState({});
 
   function detectSubLanguage(filename) {
     const lower = filename.toLowerCase();
@@ -239,8 +252,8 @@ export default function AdminPage() {
   function handleConnectGDrive() {
     if (!gdriveInputUrl.trim()) return;
     const match = gdriveInputUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
-                  gdriveInputUrl.match(/id=([a-zA-Z0-9_-]+)/) ||
-                  gdriveInputUrl.match(/^([a-zA-Z0-9_-]{20,})$/);
+      gdriveInputUrl.match(/id=([a-zA-Z0-9_-]+)/) ||
+      gdriveInputUrl.match(/^([a-zA-Z0-9_-]{20,})$/);
     if (match) {
       const fileId = match[1];
       setStreamUrl(`/api/stream/gdrive?id=${fileId}`);
@@ -269,7 +282,7 @@ export default function AdminPage() {
     }
   }
 
-  async function handleFileUpload(file, folder = 'videos', targetIndex = null) {
+  async function handleFileUpload(file, folder = 'videos', targetIndex = null, episodeIndex = null) {
     if (!file) return;
     setUploadLoading(true);
     const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
@@ -294,33 +307,69 @@ export default function AdminPage() {
           setUploadStatus(`✅ Video uploaded successfully! Public link: ${data.publicUrl}`);
         } else if (folder === 'subtitles') {
           const detectedLang = detectSubLanguage(file.name);
-          setSubtitles((prev) => {
-            const updated = [...prev];
-            if (targetIndex !== null && updated[targetIndex]) {
-              updated[targetIndex] = {
-                ...updated[targetIndex],
-                url: data.publicUrl,
-                name: updated[targetIndex].name && updated[targetIndex].name !== 'English (CC)' ? updated[targetIndex].name : detectedLang,
-              };
-            } else {
-              const emptyIdx = updated.findIndex((s) => !s.url || !s.url.trim());
-              if (emptyIdx !== -1) {
-                updated[emptyIdx] = {
-                  name: detectedLang,
+          if (episodeIndex !== null && episodeIndex !== undefined) {
+            setEpisodes((prev) => {
+              const updated = [...prev];
+              const ep = { ...updated[episodeIndex] };
+              const curSubs = Array.isArray(ep.subtitles) ? [...ep.subtitles] : [];
+              if (targetIndex !== null && curSubs[targetIndex]) {
+                curSubs[targetIndex] = {
+                  ...curSubs[targetIndex],
                   url: data.publicUrl,
-                  isDefault: emptyIdx === 0,
+                  name: curSubs[targetIndex].name && curSubs[targetIndex].name !== 'English (CC)' ? curSubs[targetIndex].name : detectedLang,
                 };
               } else {
-                updated.push({
-                  name: detectedLang,
-                  url: data.publicUrl,
-                  isDefault: updated.length === 0,
-                });
+                const emptyIdx = curSubs.findIndex((s) => !s.url || !s.url.trim());
+                if (emptyIdx !== -1) {
+                  curSubs[emptyIdx] = {
+                    name: detectedLang,
+                    url: data.publicUrl,
+                    isDefault: emptyIdx === 0,
+                  };
+                } else {
+                  curSubs.push({
+                    name: detectedLang,
+                    url: data.publicUrl,
+                    isDefault: curSubs.length === 0,
+                  });
+                }
               }
-            }
-            return updated;
-          });
-          setUploadStatus(`✅ Subtitle "${file.name}" uploaded, converted to WebVTT, and added!`);
+              ep.subtitles = curSubs;
+              updated[episodeIndex] = ep;
+              return updated;
+            });
+            setUploadStatus(`✅ Subtitle "${file.name}" uploaded and attached to Episode ${episodeIndex + 1}!`);
+            setStatusMessage({ text: `Subtitle "${file.name}" uploaded and attached to Episode ${episodeIndex + 1}!`, type: 'success' });
+          } else {
+            setSubtitles((prev) => {
+              const updated = [...prev];
+              if (targetIndex !== null && updated[targetIndex]) {
+                updated[targetIndex] = {
+                  ...updated[targetIndex],
+                  url: data.publicUrl,
+                  name: updated[targetIndex].name && updated[targetIndex].name !== 'English (CC)' ? updated[targetIndex].name : detectedLang,
+                };
+              } else {
+                const emptyIdx = updated.findIndex((s) => !s.url || !s.url.trim());
+                if (emptyIdx !== -1) {
+                  updated[emptyIdx] = {
+                    name: detectedLang,
+                    url: data.publicUrl,
+                    isDefault: emptyIdx === 0,
+                  };
+                } else {
+                  updated.push({
+                    name: detectedLang,
+                    url: data.publicUrl,
+                    isDefault: updated.length === 0,
+                  });
+                }
+              }
+              return updated;
+            });
+            setUploadStatus(`✅ Subtitle "${file.name}" uploaded, converted to WebVTT, and added!`);
+            setStatusMessage({ text: `Subtitle "${file.name}" uploaded and added!`, type: 'success' });
+          }
         }
       } else {
         setUploadStatus(`❌ Upload failed: ${data.error || 'Server error'}`);
@@ -584,11 +633,11 @@ export default function AdminPage() {
       const payload = bucket
         ? { id: bucket.id }
         : {
-            bucket_name: bucketName.trim(),
-            key_id: bucketKeyId.trim(),
-            application_key: bucketAppKey.trim(),
-            endpoint: bucketEndpoint.trim(),
-          };
+          bucket_name: bucketName.trim(),
+          key_id: bucketKeyId.trim(),
+          application_key: bucketAppKey.trim(),
+          endpoint: bucketEndpoint.trim(),
+        };
 
       const res = await fetch('/api/buckets/test', {
         method: 'POST',
@@ -672,17 +721,190 @@ export default function AdminPage() {
 
   // Subtitles Management inside form
   function addSubtitleField() {
-    setSubtitles([...subtitles, { name: 'Español', url: '', isDefault: false }]);
+    setSubtitles((prev) => [...prev, { name: 'Español', url: '', isDefault: false }]);
+    if (contentType === 'series' && episodes.length > 0) {
+      setEpisodes((prev) => {
+        const updated = [...prev];
+        const ep0 = { ...updated[0] };
+        const curSubs = Array.isArray(ep0.subtitles) ? [...ep0.subtitles] : [];
+        curSubs.push({ name: 'Español', url: '', isDefault: false });
+        ep0.subtitles = curSubs;
+        updated[0] = ep0;
+        return updated;
+      });
+    }
   }
 
   function removeSubtitleField(index) {
-    setSubtitles(subtitles.filter((_, i) => i !== index));
+    setSubtitles((prev) => prev.filter((_, i) => i !== index));
+    if (contentType === 'series' && episodes.length > 0) {
+      setEpisodes((prev) => {
+        const updated = [...prev];
+        const ep0 = { ...updated[0] };
+        const curSubs = Array.isArray(ep0.subtitles) ? [...ep0.subtitles] : [];
+        ep0.subtitles = curSubs.filter((_, i) => i !== index);
+        updated[0] = ep0;
+        return updated;
+      });
+    }
   }
 
   function updateSubtitleField(index, field, value) {
-    const updated = [...subtitles];
-    updated[index] = { ...updated[index], [field]: value };
-    setSubtitles(updated);
+    setSubtitles((prev) => {
+      const updated = [...prev];
+      if (updated[index]) {
+        updated[index] = { ...updated[index], [field]: value };
+        if (field === 'isDefault' && value) {
+          updated.forEach((s, i) => {
+            if (i !== index) s.isDefault = false;
+          });
+        }
+      }
+      return updated;
+    });
+    if (contentType === 'series' && episodes.length > 0) {
+      setEpisodes((prev) => {
+        const updated = [...prev];
+        const ep0 = { ...updated[0] };
+        const curSubs = Array.isArray(ep0.subtitles) ? [...ep0.subtitles] : [];
+        if (curSubs[index]) {
+          curSubs[index] = { ...curSubs[index], [field]: value };
+          if (field === 'isDefault' && value) {
+            curSubs.forEach((s, i) => {
+              if (i !== index) s.isDefault = false;
+            });
+          }
+        } else {
+          curSubs[index] = { name: 'English (CC)', url: '', isDefault: false, [field]: value };
+        }
+        ep0.subtitles = curSubs;
+        updated[0] = ep0;
+        return updated;
+      });
+    }
+  }
+
+  // Episode Subtitle Handlers
+  function toggleEpisodeSubs(idx) {
+    setExpandedEpisodeSubs((prev) => ({
+      ...prev,
+      [idx]: !prev[idx],
+    }));
+  }
+
+  function addEpisodeSubtitle(epIdx) {
+    setEpisodes((prev) => {
+      const updated = [...prev];
+      const ep = { ...updated[epIdx] };
+      const curSubs = Array.isArray(ep.subtitles) ? [...ep.subtitles] : [];
+      curSubs.push({
+        name: curSubs.length === 0 ? 'English (CC)' : 'Español',
+        url: '',
+        isDefault: curSubs.length === 0,
+      });
+      ep.subtitles = curSubs;
+      updated[epIdx] = ep;
+      return updated;
+    });
+    // Auto expand accordion if collapsed
+    setExpandedEpisodeSubs((prev) => ({ ...prev, [epIdx]: true }));
+
+    if (epIdx === 0) {
+      setSubtitles((prev) => [
+        ...prev,
+        {
+          name: prev.length === 0 ? 'English (CC)' : 'Español',
+          url: '',
+          isDefault: prev.length === 0,
+        }
+      ]);
+    }
+  }
+
+  function updateEpisodeSubtitle(epIdx, subIdx, field, value) {
+    setEpisodes((prev) => {
+      const updated = [...prev];
+      const ep = { ...updated[epIdx] };
+      const curSubs = Array.isArray(ep.subtitles) ? [...ep.subtitles] : [];
+      if (curSubs[subIdx]) {
+        curSubs[subIdx] = { ...curSubs[subIdx], [field]: value };
+        if (field === 'isDefault' && value) {
+          curSubs.forEach((s, i) => {
+            if (i !== subIdx) s.isDefault = false;
+          });
+        }
+      }
+      ep.subtitles = curSubs;
+      updated[epIdx] = ep;
+      return updated;
+    });
+
+    if (epIdx === 0) {
+      setSubtitles((prev) => {
+        const updated = [...prev];
+        if (updated[subIdx]) {
+          updated[subIdx] = { ...updated[subIdx], [field]: value };
+          if (field === 'isDefault' && value) {
+            updated.forEach((s, i) => {
+              if (i !== subIdx) s.isDefault = false;
+            });
+          }
+        } else {
+          updated[subIdx] = { name: 'English (CC)', url: '', isDefault: false, [field]: value };
+        }
+        return updated;
+      });
+    }
+  }
+
+  function removeEpisodeSubtitle(epIdx, subIdx) {
+    setEpisodes((prev) => {
+      const updated = [...prev];
+      const ep = { ...updated[epIdx] };
+      const curSubs = Array.isArray(ep.subtitles) ? [...ep.subtitles] : [];
+      ep.subtitles = curSubs.filter((_, i) => i !== subIdx);
+      updated[epIdx] = ep;
+      return updated;
+    });
+
+    if (epIdx === 0) {
+      setSubtitles((prev) => prev.filter((_, i) => i !== subIdx));
+    }
+  }
+
+  function triggerEpisodeSubUpload(epIdx, subIdx = null) {
+    subUploadEpisodeRef.current = epIdx;
+    subUploadTargetRef.current = subIdx;
+    subInputRef.current?.click();
+  }
+
+  async function handleFetchEpisodeSubtitles(epIdx) {
+    const ep = episodes[epIdx];
+    const queryTitle = ep?.title || title || '';
+    const queryId = id || '969681';
+    setSubSearching(true);
+    try {
+      const res = await fetch(`/api/subtitles/search?id=${encodeURIComponent(queryId)}&title=${encodeURIComponent(queryTitle)}`);
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.subtitles) && data.subtitles.length > 0) {
+        setEpisodes((prev) => {
+          const updated = [...prev];
+          updated[epIdx] = {
+            ...updated[epIdx],
+            subtitles: data.subtitles,
+          };
+          return updated;
+        });
+        setExpandedEpisodeSubs((prev) => ({ ...prev, [epIdx]: true }));
+        setStatusMessage({ text: `Auto-fetched ${data.subtitles.length} subtitle tracks for Episode ${epIdx + 1}!`, type: 'success' });
+      } else {
+        setStatusMessage({ text: `No external subtitles found for Episode ${epIdx + 1}.`, type: 'error' });
+      }
+    } catch (err) {
+      setStatusMessage({ text: `Subtitle fetch error: ${err.message}`, type: 'error' });
+    } finally {
+      setSubSearching(false);
+    }
   }
 
   // Reset form
@@ -714,6 +936,8 @@ export default function AdminPage() {
     setImportUrl('');
     setImportStatus('');
     setSubSearchId('');
+    setActiveSubtitleTab('ep-0');
+    setExpandedEpisodeSubs({});
   }
 
   // Populate form for editing
@@ -721,7 +945,31 @@ export default function AdminPage() {
     setIsEditing(true);
     const isSeries = Boolean(movie.type === 'series' || (Array.isArray(movie.episodes) && movie.episodes.length > 0));
     setContentType(isSeries ? 'series' : 'movie');
-    setEpisodes(Array.isArray(movie.episodes) ? movie.episodes : []);
+
+    const loadedEpisodes = Array.isArray(movie.episodes)
+      ? movie.episodes.map((ep, idx) => {
+        let epSubs = Array.isArray(ep.subtitles) ? ep.subtitles : [];
+        // If Episode 1 has no subtitles, but movie has legacy subtitles, sync it to Episode 1!
+        if (idx === 0 && epSubs.length === 0 && Array.isArray(movie.subtitles) && movie.subtitles.length > 0) {
+          epSubs = [...movie.subtitles];
+        }
+        let epStream = ep.stream_url || '';
+        const b2Match = epStream.match(/backblazeb2\.com\/file\/([^/]+)\/([^?#]+)/) ||
+          epStream.match(/s3\.[^/]+\.backblazeb2\.com\/([^/]+)\/([^?#]+)/);
+        if (b2Match && !epStream.startsWith('/api/stream/b2')) {
+          epStream = `/api/stream/b2/${b2Match[1]}/${b2Match[2]}`;
+        }
+        return {
+          ...ep,
+          stream_url: epStream,
+          subtitles: epSubs,
+        };
+      })
+      : [];
+
+    setEpisodes(loadedEpisodes);
+    setActiveSubtitleTab('ep-0');
+    setExpandedEpisodeSubs({});
     setBulkEpisodesText('');
     setShowBulkImporter(false);
     setId(movie.id);
@@ -820,16 +1068,37 @@ export default function AdminPage() {
 
     const movieSlug = id.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
 
-    const validEpisodes = episodes.map((ep, idx) => ({
-      id: ep.id || `ep-${idx + 1}`,
-      episode_number: idx + 1,
-      title: ep.title?.trim() || `Episode ${idx + 1}`,
-      stream_url: ep.stream_url?.trim() || '',
-      duration: ep.duration?.trim() || '1h 00m',
-      subtitles: Array.isArray(ep.subtitles) ? ep.subtitles : [],
-    }));
+    const validEpisodes = episodes.map((ep, idx) => {
+      let epStream = ep.stream_url?.trim() || '';
+      const b2Match = epStream.match(/backblazeb2\.com\/file\/([^/]+)\/([^?#]+)/) ||
+        epStream.match(/s3\.[^/]+\.backblazeb2\.com\/([^/]+)\/([^?#]+)/);
+      if (b2Match && !epStream.startsWith('/api/stream/b2')) {
+        epStream = `/api/stream/b2/${b2Match[1]}/${b2Match[2]}`;
+      }
+      let epSubs = Array.isArray(ep.subtitles)
+        ? ep.subtitles.filter((s) => s.url && s.url.trim().length > 0).map((s) => ({
+            name: s.name.trim() || 'Subtitle',
+            url: s.url.trim(),
+            isDefault: Boolean(s.isDefault),
+          }))
+        : [];
+      if (idx === 0 && epSubs.length === 0 && validSubs.length > 0) {
+        epSubs = validSubs;
+      }
+      return {
+        id: ep.id || `ep-${idx + 1}`,
+        episode_number: idx + 1,
+        title: ep.title?.trim() || `Episode ${idx + 1}`,
+        stream_url: epStream,
+        duration: ep.duration?.trim() || '1h 00m',
+        subtitles: epSubs,
+      };
+    });
 
     const primaryStreamUrl = streamUrl.trim() || (validEpisodes[0] ? validEpisodes[0].stream_url : '');
+    const seriesFallbackSubs = (contentType === 'series' && validEpisodes[0]?.subtitles?.length > 0)
+      ? validEpisodes[0].subtitles
+      : validSubs;
 
     const payload = {
       id: movieSlug,
@@ -1748,79 +2017,237 @@ create policy "Allow service role full access"
                             key={ep.id || idx}
                             style={{
                               background: 'rgba(7, 9, 14, 0.75)',
-                              border: '1px solid var(--border)',
+                              border: expandedEpisodeSubs[idx] ? '1px solid rgba(99, 102, 241, 0.45)' : '1px solid var(--border)',
                               borderRadius: 'var(--radius-md)',
                               padding: '12px 16px',
                               display: 'flex',
-                              alignItems: 'center',
+                              flexDirection: 'column',
                               gap: 10,
-                              flexWrap: 'wrap'
+                              transition: 'border-color 0.2s ease'
                             }}
                           >
-                            <div style={{
-                              width: 32,
-                              height: 32,
-                              borderRadius: 8,
-                              background: 'rgba(99, 102, 241, 0.25)',
-                              color: '#a5b4fc',
-                              fontWeight: 700,
-                              fontSize: '0.85rem',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              flexShrink: 0
-                            }}>
-                              {idx + 1}
-                            </div>
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 10,
+                                flexWrap: 'wrap',
+                                width: '100%'
+                              }}
+                            >
+                              <div style={{
+                                width: 32,
+                                height: 32,
+                                borderRadius: 8,
+                                background: 'rgba(99, 102, 241, 0.25)',
+                                color: '#a5b4fc',
+                                fontWeight: 700,
+                                fontSize: '0.85rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0
+                              }}>
+                                {idx + 1}
+                              </div>
 
-                            <input
-                              type="text"
-                              className="form-input"
-                              placeholder={`Episode ${idx + 1} Title`}
-                              value={ep.title}
-                              onChange={(e) => updateEpisode(idx, 'title', e.target.value)}
-                              style={{ width: 180, flexShrink: 0 }}
-                            />
+                              <input
+                                type="text"
+                                className="form-input"
+                                placeholder={`Episode ${idx + 1} Title`}
+                                value={ep.title}
+                                onChange={(e) => updateEpisode(idx, 'title', e.target.value)}
+                                style={{ width: 180, flexShrink: 0 }}
+                              />
 
-                            <input
-                              type="text"
-                              className="form-input"
-                              placeholder="Duration (1h 05m)"
-                              value={ep.duration}
-                              onChange={(e) => updateEpisode(idx, 'duration', e.target.value)}
-                              style={{ width: 120, flexShrink: 0 }}
-                            />
+                              <input
+                                type="text"
+                                className="form-input"
+                                placeholder="Duration (1h 05m)"
+                                value={ep.duration}
+                                onChange={(e) => updateEpisode(idx, 'duration', e.target.value)}
+                                style={{ width: 120, flexShrink: 0 }}
+                              />
 
-                            <input
-                              type="text"
-                              className="form-input"
-                              placeholder="Google Drive link (1wc90...) or Video URL"
-                              value={ep.stream_url}
-                              onChange={(e) => updateEpisode(idx, 'stream_url', e.target.value)}
-                              style={{ flex: 1, minWidth: 200 }}
-                            />
+                              <input
+                                type="text"
+                                className="form-input"
+                                placeholder="Google Drive link (1wc90...) or Video URL"
+                                value={ep.stream_url}
+                                onChange={(e) => updateEpisode(idx, 'stream_url', e.target.value)}
+                                style={{ flex: 1, minWidth: 200 }}
+                              />
 
-                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                              {ep.stream_url && (
+                              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                                 <button
                                   type="button"
-                                  onClick={() => setTestStreamUrl(ep.stream_url)}
+                                  onClick={() => toggleEpisodeSubs(idx)}
                                   className="nav-btn nav-btn-ghost"
-                                  style={{ padding: '6px 10px', fontSize: '0.78rem' }}
-                                  title="Preview Episode Video"
+                                  style={{
+                                    padding: '6px 12px',
+                                    fontSize: '0.78rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 5,
+                                    borderRadius: 6,
+                                    background: (ep.subtitles && ep.subtitles.length > 0)
+                                      ? 'rgba(56, 189, 248, 0.15)'
+                                      : (expandedEpisodeSubs[idx] ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255,255,255,0.05)'),
+                                    color: (ep.subtitles && ep.subtitles.length > 0) ? '#38bdf8' : '#cbd5e1',
+                                    border: (ep.subtitles && ep.subtitles.length > 0)
+                                      ? '1px solid rgba(56, 189, 248, 0.4)'
+                                      : '1px solid rgba(255,255,255,0.1)',
+                                    cursor: 'pointer'
+                                  }}
+                                  title="Manage Subtitles for this episode"
                                 >
-                                  <Play size={13} />
+                                  <Subtitles size={13} />
+                                  <span>Subs ({ep.subtitles?.length || 0})</span>
+                                  {expandedEpisodeSubs[idx] ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                                 </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => removeEpisode(idx)}
-                                className="btn-remove-sub"
-                                title="Delete Episode"
-                              >
-                                <Trash2 size={16} />
-                              </button>
+
+                                {ep.stream_url && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setTestStreamUrl(ep.stream_url)}
+                                    className="nav-btn nav-btn-ghost"
+                                    style={{ padding: '6px 10px', fontSize: '0.78rem' }}
+                                    title="Preview Episode Video"
+                                  >
+                                    <Play size={13} />
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => removeEpisode(idx)}
+                                  className="btn-remove-sub"
+                                  title="Delete Episode"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
                             </div>
+
+                            {/* Inline Expandable Episode Subtitles Drawer */}
+                            {expandedEpisodeSubs[idx] && (
+                              <div style={{
+                                width: '100%',
+                                marginTop: 6,
+                                padding: '12px 14px',
+                                background: 'rgba(11, 15, 25, 0.95)',
+                                borderRadius: 8,
+                                border: '1px solid rgba(99, 102, 241, 0.35)',
+                              }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#e0e7ff' }}>
+                                      💬 Subtitles for Episode {idx + 1}: {ep.title || `Episode ${idx + 1}`}
+                                    </span>
+                                    <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                                      (Syncs automatically when viewers watch Ep {idx + 1})
+                                    </span>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => triggerEpisodeSubUpload(idx, null)}
+                                      disabled={uploadLoading}
+                                      className="nav-btn nav-btn-primary"
+                                      style={{ fontSize: '0.74rem', padding: '5px 10px', background: '#0284c7' }}
+                                    >
+                                      <Upload size={12} />
+                                      <span>Upload (.SRT / .VTT)</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleFetchEpisodeSubtitles(idx)}
+                                      disabled={subSearching}
+                                      className="nav-btn nav-btn-primary"
+                                      style={{ fontSize: '0.74rem', padding: '5px 10px' }}
+                                    >
+                                      <Wand2 size={12} />
+                                      <span>Auto-Fetch Subs</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => addEpisodeSubtitle(idx)}
+                                      className="btn-add-sub"
+                                      style={{ fontSize: '0.74rem', padding: '5px 10px' }}
+                                    >
+                                      <Plus size={12} /> Add Row
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {(!ep.subtitles || ep.subtitles.length === 0) ? (
+                                  <div style={{ padding: '12px', textAlign: 'center', background: 'rgba(0,0,0,0.25)', borderRadius: 6, border: '1px dashed rgba(255,255,255,0.1)' }}>
+                                    <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                                      No subtitle tracks configured for this episode yet. Click <b>Upload (.SRT / .VTT)</b> or <b>Add Row</b> above to add one!
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                    {ep.subtitles.map((sub, sIdx) => (
+                                      <div key={sIdx} className="sub-item-row" style={{ padding: '6px 8px', background: 'rgba(0,0,0,0.3)', borderRadius: 6 }}>
+                                        <input
+                                          type="text"
+                                          placeholder="Language (e.g. English, Español)"
+                                          className="form-input"
+                                          style={{ width: 150, fontSize: '0.8rem' }}
+                                          value={sub.name}
+                                          onChange={(e) => updateEpisodeSubtitle(idx, sIdx, 'name', e.target.value)}
+                                        />
+                                        <input
+                                          type="url"
+                                          placeholder="Subtitle URL (.vtt / .srt or Supabase link)"
+                                          className="form-input"
+                                          style={{ flex: 1, fontSize: '0.8rem' }}
+                                          value={sub.url}
+                                          onChange={(e) => updateEpisodeSubtitle(idx, sIdx, 'url', e.target.value)}
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => triggerEpisodeSubUpload(idx, sIdx)}
+                                          style={{
+                                            fontSize: '0.74rem',
+                                            padding: '5px 8px',
+                                            borderRadius: 5,
+                                            background: 'rgba(255,255,255,0.06)',
+                                            color: '#38bdf8',
+                                            border: '1px solid rgba(56, 189, 248, 0.3)',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: 4,
+                                            whiteSpace: 'nowrap'
+                                          }}
+                                          title="Upload file for this row"
+                                        >
+                                          <Upload size={12} />
+                                          <span>Upload</span>
+                                        </button>
+                                        <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.76rem', color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                          <input
+                                            type="checkbox"
+                                            checked={Boolean(sub.isDefault)}
+                                            onChange={(e) => updateEpisodeSubtitle(idx, sIdx, 'isDefault', e.target.checked)}
+                                          />
+                                          Default
+                                        </label>
+                                        <button
+                                          type="button"
+                                          onClick={() => removeEpisodeSubtitle(idx, sIdx)}
+                                          className="btn-remove-sub"
+                                          title="Remove track"
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1942,432 +2369,37 @@ create policy "Allow service role full access"
                     </div>
                   </div>
 
-                <input
-                  type="file"
-                  ref={videoInputRef}
-                  style={{ display: 'none' }}
-                  accept="video/mp4,video/webm,video/x-matroska"
-                  onChange={(e) => {
-                    if (e.target.files?.[0]) handleFileUpload(e.target.files[0], 'videos');
-                  }}
-                />
+                  <input
+                    type="file"
+                    ref={videoInputRef}
+                    style={{ display: 'none' }}
+                    accept="video/mp4,video/webm,video/x-matroska"
+                    onChange={(e) => {
+                      if (e.target.files?.[0]) handleFileUpload(e.target.files[0], 'videos');
+                    }}
+                  />
 
-                {/* MODE 1: YouTube Unlisted Video (Zero Ads Cinema) */}
-                {sourceMode === 'youtube' ? (
-                  <div>
-                    {streamUrl && getYouTubeId(streamUrl) ? (
-                      <div style={{
-                        background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(153, 27, 27, 0.2))',
-                        border: '1px solid rgba(239, 68, 68, 0.35)',
-                        borderRadius: 'var(--radius-md)',
-                        padding: '18px 20px'
-                      }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#fca5a5', fontSize: '0.98rem' }}>
-                              <CheckCircle2 size={19} color="#ef4444" />
-                              <span>Active Ad-Free YouTube Cinema Stream Connected</span>
-                            </div>
-                            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                              Video ID: <strong style={{ color: '#fff' }}>{getYouTubeId(streamUrl)}</strong> • Ultra-fast Google CDN, zero bandwidth limits, 100% ad-free playback.
-                            </p>
-                          </div>
-                          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                            <button
-                              type="button"
-                              onClick={() => setTestStreamUrl(streamUrl)}
-                              className="nav-btn nav-btn-ghost"
-                              style={{ fontSize: '0.8rem', padding: '6px 14px' }}
-                            >
-                              <Play size={14} /> Preview Stream
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => { setStreamUrl(''); setYoutubeInputUrl(''); }}
-                              className="nav-btn nav-btn-ghost"
-                              style={{ fontSize: '0.8rem', padding: '6px 12px', color: '#f87171' }}
-                            >
-                              <Trash2 size={14} /> Disconnect
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{
-                        border: '1px solid rgba(239, 68, 68, 0.3)',
-                        borderRadius: 'var(--radius-md)',
-                        padding: '24px 20px',
-                        background: 'rgba(239, 68, 68, 0.05)'
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                          <Play size={22} color="#ef4444" />
-                          <div style={{ fontWeight: 700, color: '#fff', fontSize: '1rem' }}>
-                            Connect YouTube Video (Unlisted • 100% Ad-Free)
-                          </div>
-                        </div>
-                        <div style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.6 }}>
-                          <div style={{ marginBottom: 4 }}>
-                            💡 <strong>Zero Ads Guarantee:</strong> Upload your movie to YouTube and set visibility to <strong>Unlisted</strong> with monetization off.
-                          </div>
-                          <div>
-                            YouTube unlisted videos never show advertisements, have unlimited Google CDN streaming speed, and never hit Google Drive's "too many users" quota limit.
-                          </div>
-                        </div>
-                        <div style={{ display: 'flex', gap: 10 }}>
-                          <input
-                            type="text"
-                            className="form-input"
-                            placeholder="Paste YouTube link (https://youtu.be/... or https://youtube.com/watch?v=...) or Video ID"
-                            value={youtubeInputUrl}
-                            onChange={(e) => setYoutubeInputUrl(e.target.value)}
-                            style={{ flex: 1 }}
-                          />
-                          <button
-                            type="button"
-                            onClick={handleConnectYouTube}
-                            className="nav-btn nav-btn-primary"
-                            style={{ whiteSpace: 'nowrap', padding: '0 20px', background: '#ef4444', borderColor: '#dc2626' }}
-                          >
-                            Connect Video
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : sourceMode === 'upload' ? (
-                  /* MODE 2: Direct Storage Upload */
-                  <div>
-                    {streamUrl && (streamUrl.includes('supabase.co') || streamUrl.endsWith('.mp4') || streamUrl.endsWith('.webm')) ? (
-                      <div style={{
-                        background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(6, 78, 59, 0.2))',
-                        border: '1px solid rgba(16, 185, 129, 0.35)',
-                        borderRadius: 'var(--radius-md)',
-                        padding: '18px 20px'
-                      }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#86efac', fontSize: '0.98rem' }}>
-                              <CheckCircle2 size={19} color="#10b981" />
-                              <span>Active Video File in Supabase Storage</span>
-                            </div>
-                            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                              100% Ad-Free Native Cinema Stream ready. Viewers enjoy pure HTML5 playback with multi-language subtitle tracks.
-                            </p>
-                          </div>
-                          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                            <button
-                              type="button"
-                              onClick={() => setTestStreamUrl(streamUrl)}
-                              className="nav-btn nav-btn-ghost"
-                              style={{ fontSize: '0.8rem', padding: '6px 14px' }}
-                            >
-                              <Play size={14} /> Preview Stream
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => videoInputRef.current?.click()}
-                              disabled={uploadLoading}
-                              className="nav-btn nav-btn-primary"
-                              style={{ fontSize: '0.8rem', padding: '6px 14px' }}
-                            >
-                              {uploadLoading ? <RefreshCw size={14} className="spin" /> : <Upload size={14} />}
-                              <span>Replace Video</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setStreamUrl('')}
-                              className="nav-btn nav-btn-ghost"
-                              style={{ fontSize: '0.8rem', padding: '6px 12px', color: '#f87171' }}
-                            >
-                              <Trash2 size={14} /> Remove
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div
-                        onClick={() => videoInputRef.current?.click()}
-                        style={{
-                          border: '2px dashed rgba(99, 102, 241, 0.45)',
+                  {/* MODE 1: YouTube Unlisted Video (Zero Ads Cinema) */}
+                  {sourceMode === 'youtube' ? (
+                    <div>
+                      {streamUrl && getYouTubeId(streamUrl) ? (
+                        <div style={{
+                          background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(153, 27, 27, 0.2))',
+                          border: '1px solid rgba(239, 68, 68, 0.35)',
                           borderRadius: 'var(--radius-md)',
-                          padding: '36px 20px',
-                          textAlign: 'center',
-                          cursor: uploadLoading ? 'not-allowed' : 'pointer',
-                          background: 'rgba(99, 102, 241, 0.05)',
-                          transition: '0.2s ease'
-                        }}
-                      >
-                        {uploadLoading ? (
-                          <RefreshCw size={36} className="spin" color="#818cf8" style={{ margin: '0 auto 12px' }} />
-                        ) : (
-                          <Upload size={36} color="#818cf8" style={{ margin: '0 auto 12px' }} />
-                        )}
-                        <div style={{ fontWeight: 700, color: '#fff', fontSize: '1.05rem' }}>
-                          {uploadLoading ? 'Uploading Movie to Supabase Storage...' : 'Click to Upload MP4 Movie File'}
-                        </div>
-                        <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginTop: 6 }}>
-                          Stored permanently in your Supabase bucket. Enables full 1080p Artplayer with zero ads, zero popups, and no token expiration.
-                        </p>
-                      </div>
-                    )}
-                    {uploadStatus && (
-                      <div style={{
-                        marginTop: 10,
-                        padding: '8px 14px',
-                        borderRadius: 6,
-                        fontSize: '0.82rem',
-                        background: uploadStatus.startsWith('✅') ? 'rgba(16, 185, 129, 0.18)' : 'rgba(99, 102, 241, 0.18)',
-                        color: uploadStatus.startsWith('✅') ? '#86efac' : '#c7d2fe',
-                        border: '1px solid rgba(255,255,255,0.1)'
-                      }}>
-                        {uploadStatus}
-                      </div>
-                    )}
-                  </div>
-                ) : sourceMode === 'gdrive' ? (
-                  /* MODE 3: Google Drive 5TB Account */
-                  <div>
-                    {streamUrl && (streamUrl.includes('gdrive') || streamUrl.includes('drive.google.com')) ? (
-                      <div style={{
-                        background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(30, 58, 138, 0.2))',
-                        border: '1px solid rgba(59, 130, 246, 0.35)',
-                        borderRadius: 'var(--radius-md)',
-                        padding: '18px 20px'
-                      }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#93c5fd', fontSize: '0.98rem' }}>
-                              <CheckCircle2 size={19} color="#3b82f6" />
-                              <span>Active 5TB Google Drive Pro Stream Connected</span>
-                            </div>
-                            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                              Direct 1080p proxy stream with byte-range seeking (HTTP 206) and zero ads. Stored in your Google Drive.
-                            </p>
-                          </div>
-                          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                            <button
-                              type="button"
-                              onClick={() => setTestStreamUrl(streamUrl)}
-                              className="nav-btn nav-btn-ghost"
-                              style={{ fontSize: '0.8rem', padding: '6px 14px' }}
-                            >
-                              <Play size={14} /> Preview Stream
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => { setStreamUrl(''); setGdriveInputUrl(''); }}
-                              className="nav-btn nav-btn-ghost"
-                              style={{ fontSize: '0.8rem', padding: '6px 12px', color: '#f87171' }}
-                            >
-                              <Trash2 size={14} /> Disconnect
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{
-                        border: '1px solid rgba(59, 130, 246, 0.3)',
-                        borderRadius: 'var(--radius-md)',
-                        padding: '24px 20px',
-                        background: 'rgba(59, 130, 246, 0.05)'
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                          <Film size={22} color="#60a5fa" />
-                          <div style={{ fontWeight: 700, color: '#fff', fontSize: '1rem' }}>
-                            Connect Video from your 5TB Google Drive Pro
-                          </div>
-                        </div>
-                        <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5 }}>
-                          1. In Google Drive, right-click your MP4 movie and set Share to <strong>"Anyone with the link can view"</strong>.<br />
-                          2. Paste the share link below. WatchBox will stream it directly in full 1080p with zero ads, high-speed buffering, and custom subtitles.
-                        </p>
-                        <div style={{ display: 'flex', gap: 10 }}>
-                          <input
-                            type="text"
-                            className="form-input"
-                            placeholder="https://drive.google.com/file/d/1XyZ.../view?usp=sharing or File ID"
-                            value={gdriveInputUrl}
-                            onChange={(e) => setGdriveInputUrl(e.target.value)}
-                            style={{ flex: 1 }}
-                          />
-                          <button
-                            type="button"
-                            onClick={handleConnectGDrive}
-                            className="nav-btn nav-btn-primary"
-                            style={{ whiteSpace: 'nowrap', padding: '0 20px' }}
-                          >
-                            Connect Video
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : sourceMode === 'b2' ? (
-                  /* MODE: Backblaze B2 Multi-Account Storage */
-                  <div style={{
-                    border: '1px solid rgba(2, 132, 199, 0.35)',
-                    borderRadius: 'var(--radius-md)',
-                    padding: '22px 20px',
-                    background: 'rgba(2, 132, 199, 0.05)'
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <HardDrive size={22} color="#38bdf8" />
-                        <div>
-                          <div style={{ fontWeight: 700, color: '#fff', fontSize: '1rem' }}>
-                            Backblaze B2 Multi-Account Storage Stream
-                          </div>
-                          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0 }}>
-                            Zero ads, native 1080p Artplayer with byte-range seeking, 100% free accounts.
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveTab('buckets');
-                          loadBuckets();
-                        }}
-                        className="nav-btn nav-btn-ghost"
-                        style={{ fontSize: '0.78rem', padding: '6px 12px', color: '#38bdf8' }}
-                      >
-                        Manage Buckets &rarr;
-                      </button>
-                    </div>
-
-                    {buckets.length === 0 ? (
-                      <div style={{ padding: 18, background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: 8, color: '#fca5a5', fontSize: '0.88rem' }}>
-                        No storage buckets configured yet. Please open the <strong>"Storage Buckets"</strong> tab to configure your first free Backblaze B2 account!
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
-                          <div>
-                            <label className="input-label" style={{ marginBottom: 6 }}>
-                              Select Storage Bucket / Account *
-                            </label>
-                            <select
-                              className="form-input"
-                              value={selectedB2BucketId}
-                              onChange={(e) => {
-                                const newBucketId = e.target.value;
-                                setSelectedB2BucketId(newBucketId);
-                                if (b2FileKey.trim()) {
-                                  const encoded = b2FileKey.trim().split('/').map(encodeURIComponent).join('/');
-                                  setStreamUrl(`/api/stream/b2/${newBucketId}/${encoded}`);
-                                }
-                                handleFetchBucketFiles(newBucketId);
-                              }}
-                              style={{ width: '100%', cursor: 'pointer' }}
-                            >
-                              {buckets.map((b) => (
-                                <option key={b.id} value={b.id}>
-                                  {b.label} ({b.bucket_name} • {b.endpoint}) {b.is_default ? '★ Default' : ''}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="input-label" style={{ marginBottom: 6 }}>
-                              File Key (Filename in Bucket) *
-                            </label>
-                            <div style={{ display: 'flex', gap: 8 }}>
-                              <input
-                                type="text"
-                                className="form-input"
-                                placeholder="e.g. myfile.mp4 or movies/avatar.mp4"
-                                value={b2FileKey}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  setB2FileKey(val);
-                                  if (val.trim()) {
-                                    const encoded = val.trim().split('/').map(encodeURIComponent).join('/');
-                                    setStreamUrl(`/api/stream/b2/${selectedB2BucketId || 'default'}/${encoded}`);
-                                  } else {
-                                    setStreamUrl('');
-                                  }
-                                }}
-                                style={{ flex: 1 }}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleFetchBucketFiles(selectedB2BucketId)}
-                                disabled={b2LoadingFiles || !selectedB2BucketId}
-                                className="nav-btn nav-btn-primary"
-                                style={{ whiteSpace: 'nowrap', padding: '0 16px', background: '#0284c7' }}
-                                title="Query bucket files using S3 list"
-                              >
-                                {b2LoadingFiles ? <RefreshCw size={14} className="spin" /> : <RefreshCw size={14} />}
-                                <span>{b2LoadingFiles ? 'Checking...' : 'List Files'}</span>
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Quick-clickable detected files pills */}
-                        {b2DiscoveredFiles.length > 0 && (
-                          <div style={{ background: 'rgba(0,0,0,0.25)', padding: '10px 14px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)' }}>
-                            <div style={{ fontSize: '0.78rem', color: '#94a3b8', marginBottom: 6, fontWeight: 600 }}>
-                              Detected files in this bucket (click to select):
-                            </div>
-                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                              {b2DiscoveredFiles.map((file) => (
-                                <button
-                                  key={file}
-                                  type="button"
-                                  onClick={() => {
-                                    setB2FileKey(file);
-                                    const encoded = file.split('/').map(encodeURIComponent).join('/');
-                                    const path = `/api/stream/b2/${selectedB2BucketId || 'default'}/${encoded}`;
-                                    setStreamUrl(path);
-                                    setStatusMessage({ text: `Selected "${file}"! Stream URL set to ${path}`, type: 'success' });
-                                  }}
-                                  style={{
-                                    fontSize: '0.78rem',
-                                    padding: '5px 12px',
-                                    borderRadius: 16,
-                                    background: b2FileKey === file ? '#0284c7' : 'rgba(255,255,255,0.07)',
-                                    color: b2FileKey === file ? '#fff' : '#cbd5e1',
-                                    border: b2FileKey === file ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.12)',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: 5,
-                                    transition: '0.15s ease'
-                                  }}
-                                >
-                                  <Film size={12} />
-                                  <span>{file}</span>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Active Gateway Stream Info */}
-                        {streamUrl && (streamUrl.includes('/api/stream/b2') || streamUrl.includes('backblazeb2.com')) && (
-                          <div style={{
-                            background: 'linear-gradient(135deg, rgba(2, 132, 199, 0.15), rgba(12, 74, 110, 0.25))',
-                            border: '1px solid rgba(56, 189, 248, 0.35)',
-                            borderRadius: 'var(--radius-md)',
-                            padding: '14px 16px',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            flexWrap: 'wrap',
-                            gap: 10
-                          }}>
+                          padding: '18px 20px'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
                             <div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#7dd3fc', fontSize: '0.92rem' }}>
-                                <CheckCircle2 size={18} color="#38bdf8" />
-                                <span>Connected WatchBox Dynamic B2 Gateway</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#fca5a5', fontSize: '0.98rem' }}>
+                                <CheckCircle2 size={19} color="#ef4444" />
+                                <span>Active Ad-Free YouTube Cinema Stream Connected</span>
                               </div>
-                              <p style={{ fontSize: '0.8rem', color: '#cbd5e1', marginTop: 3, wordBreak: 'break-all' }}>
-                                Gateway URL: <code>{streamUrl}</code>
+                              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                                Video ID: <strong style={{ color: '#fff' }}>{getYouTubeId(streamUrl)}</strong> • Ultra-fast Google CDN, zero bandwidth limits, 100% ad-free playback.
                               </p>
                             </div>
-                            <div style={{ display: 'flex', gap: 8 }}>
+                            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                               <button
                                 type="button"
                                 onClick={() => setTestStreamUrl(streamUrl)}
@@ -2378,91 +2410,486 @@ create policy "Allow service role full access"
                               </button>
                               <button
                                 type="button"
-                                onClick={() => { setStreamUrl(''); setB2FileKey(''); }}
+                                onClick={() => { setStreamUrl(''); setYoutubeInputUrl(''); }}
                                 className="nav-btn nav-btn-ghost"
-                                style={{ fontSize: '0.8rem', padding: '6px 10px', color: '#f87171' }}
+                                style={{ fontSize: '0.8rem', padding: '6px 12px', color: '#f87171' }}
                               >
-                                <Trash2 size={14} /> Clear
+                                <Trash2 size={14} /> Disconnect
                               </button>
                             </div>
                           </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  /* MODE 4: External Stream / Embed Link */
-                  <div>
-                    <input
-                      type="url"
-                      className="form-input"
-                      placeholder="https://ok.ru/video/123456789 or https://vidlink.pro/movie/969681"
-                      value={streamUrl}
-                      onChange={(e) => {
-                        const val = e.target.value.trim();
-                        const okMatch = val.match(/ok\.ru\/(?:video|videoembed)\/(\d+)/);
-                        if (okMatch) {
-                          setStreamUrl(`https://ok.ru/videoembed/${okMatch[1]}`);
-                        } else {
-                          setStreamUrl(e.target.value);
-                        }
-                      }}
-                      required={sourceMode === 'link'}
-                      id="form-stream-url"
-                    />
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
-                      <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
-                        Enter an embed URL or third-party manifest. Viewers will use the Web Embed Player.
-                      </p>
-                      {streamUrl && (
-                        <button
-                          type="button"
-                          onClick={() => setTestStreamUrl(streamUrl)}
-                          style={{ fontSize: '0.78rem', color: 'var(--primary)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer' }}
-                        >
-                          Test Play Link &rarr;
-                        </button>
+                        </div>
+                      ) : (
+                        <div style={{
+                          border: '1px solid rgba(239, 68, 68, 0.3)',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '24px 20px',
+                          background: 'rgba(239, 68, 68, 0.05)'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                            <Play size={22} color="#ef4444" />
+                            <div style={{ fontWeight: 700, color: '#fff', fontSize: '1rem' }}>
+                              Connect YouTube Video (Unlisted • 100% Ad-Free)
+                            </div>
+                          </div>
+                          <div style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.6 }}>
+                            <div style={{ marginBottom: 4 }}>
+                              💡 <strong>Zero Ads Guarantee:</strong> Upload your movie to YouTube and set visibility to <strong>Unlisted</strong> with monetization off.
+                            </div>
+                            <div>
+                              YouTube unlisted videos never show advertisements, have unlimited Google CDN streaming speed, and never hit Google Drive's "too many users" quota limit.
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: 10 }}>
+                            <input
+                              type="text"
+                              className="form-input"
+                              placeholder="Paste YouTube link (https://youtu.be/... or https://youtube.com/watch?v=...) or Video ID"
+                              value={youtubeInputUrl}
+                              onChange={(e) => setYoutubeInputUrl(e.target.value)}
+                              style={{ flex: 1 }}
+                            />
+                            <button
+                              type="button"
+                              onClick={handleConnectYouTube}
+                              className="nav-btn nav-btn-primary"
+                              style={{ whiteSpace: 'nowrap', padding: '0 20px', background: '#ef4444', borderColor: '#dc2626' }}
+                            >
+                              Connect Video
+                            </button>
+                          </div>
+                        </div>
                       )}
                     </div>
-                  </div>
-                )}
-
-                {/* Inline Video Tester */}
-                {testStreamUrl && (
-                  <div className="stream-tester-box" style={{ marginTop: 14 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>
-                        {getYouTubeId(testStreamUrl) ? 'Previewing Ad-Free YouTube Cinema Stream:' : 'Previewing Video File:'}
-                      </span>
-                      <button type="button" onClick={() => setTestStreamUrl('')} style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-                        Close Preview
-                      </button>
+                  ) : sourceMode === 'upload' ? (
+                    /* MODE 2: Direct Storage Upload */
+                    <div>
+                      {streamUrl && (streamUrl.includes('supabase.co') || streamUrl.endsWith('.mp4') || streamUrl.endsWith('.webm')) ? (
+                        <div style={{
+                          background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(6, 78, 59, 0.2))',
+                          border: '1px solid rgba(16, 185, 129, 0.35)',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '18px 20px'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#86efac', fontSize: '0.98rem' }}>
+                                <CheckCircle2 size={19} color="#10b981" />
+                                <span>Active Video File in Supabase Storage</span>
+                              </div>
+                              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                                100% Ad-Free Native Cinema Stream ready. Viewers enjoy pure HTML5 playback with multi-language subtitle tracks.
+                              </p>
+                            </div>
+                            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                              <button
+                                type="button"
+                                onClick={() => setTestStreamUrl(streamUrl)}
+                                className="nav-btn nav-btn-ghost"
+                                style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+                              >
+                                <Play size={14} /> Preview Stream
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => videoInputRef.current?.click()}
+                                disabled={uploadLoading}
+                                className="nav-btn nav-btn-primary"
+                                style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+                              >
+                                {uploadLoading ? <RefreshCw size={14} className="spin" /> : <Upload size={14} />}
+                                <span>Replace Video</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setStreamUrl('')}
+                                className="nav-btn nav-btn-ghost"
+                                style={{ fontSize: '0.8rem', padding: '6px 12px', color: '#f87171' }}
+                              >
+                                <Trash2 size={14} /> Remove
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          onClick={() => videoInputRef.current?.click()}
+                          style={{
+                            border: '2px dashed rgba(99, 102, 241, 0.45)',
+                            borderRadius: 'var(--radius-md)',
+                            padding: '36px 20px',
+                            textAlign: 'center',
+                            cursor: uploadLoading ? 'not-allowed' : 'pointer',
+                            background: 'rgba(99, 102, 241, 0.05)',
+                            transition: '0.2s ease'
+                          }}
+                        >
+                          {uploadLoading ? (
+                            <RefreshCw size={36} className="spin" color="#818cf8" style={{ margin: '0 auto 12px' }} />
+                          ) : (
+                            <Upload size={36} color="#818cf8" style={{ margin: '0 auto 12px' }} />
+                          )}
+                          <div style={{ fontWeight: 700, color: '#fff', fontSize: '1.05rem' }}>
+                            {uploadLoading ? 'Uploading Movie to Supabase Storage...' : 'Click to Upload MP4 Movie File'}
+                          </div>
+                          <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginTop: 6 }}>
+                            Stored permanently in your Supabase bucket. Enables full 1080p Artplayer with zero ads, zero popups, and no token expiration.
+                          </p>
+                        </div>
+                      )}
+                      {uploadStatus && (
+                        <div style={{
+                          marginTop: 10,
+                          padding: '8px 14px',
+                          borderRadius: 6,
+                          fontSize: '0.82rem',
+                          background: uploadStatus.startsWith('✅') ? 'rgba(16, 185, 129, 0.18)' : 'rgba(99, 102, 241, 0.18)',
+                          color: uploadStatus.startsWith('✅') ? '#86efac' : '#c7d2fe',
+                          border: '1px solid rgba(255,255,255,0.1)'
+                        }}>
+                          {uploadStatus}
+                        </div>
+                      )}
                     </div>
-                    {getYouTubeId(testStreamUrl) ? (
-                      <div style={{ position: 'relative', width: '100%', aspectRatio: '16/9', borderRadius: 8, overflow: 'hidden', background: '#000' }}>
-                        <iframe
-                          src={`https://www.youtube-nocookie.com/embed/${getYouTubeId(testStreamUrl)}?autoplay=1&rel=0&modestbranding=1&iv_load_policy=3&playsinline=1&fs=1&controls=1&color=white`}
-                          style={{ width: '100%', height: '100%', border: 'none' }}
-                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-                          allowFullScreen
-                          referrerPolicy="strict-origin-when-cross-origin"
-                          title="Preview"
-                        />
+                  ) : sourceMode === 'gdrive' ? (
+                    /* MODE 3: Google Drive 5TB Account */
+                    <div>
+                      {streamUrl && (streamUrl.includes('gdrive') || streamUrl.includes('drive.google.com')) ? (
+                        <div style={{
+                          background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(30, 58, 138, 0.2))',
+                          border: '1px solid rgba(59, 130, 246, 0.35)',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '18px 20px'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#93c5fd', fontSize: '0.98rem' }}>
+                                <CheckCircle2 size={19} color="#3b82f6" />
+                                <span>Active 5TB Google Drive Pro Stream Connected</span>
+                              </div>
+                              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                                Direct 1080p proxy stream with byte-range seeking (HTTP 206) and zero ads. Stored in your Google Drive.
+                              </p>
+                            </div>
+                            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                              <button
+                                type="button"
+                                onClick={() => setTestStreamUrl(streamUrl)}
+                                className="nav-btn nav-btn-ghost"
+                                style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+                              >
+                                <Play size={14} /> Preview Stream
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => { setStreamUrl(''); setGdriveInputUrl(''); }}
+                                className="nav-btn nav-btn-ghost"
+                                style={{ fontSize: '0.8rem', padding: '6px 12px', color: '#f87171' }}
+                              >
+                                <Trash2 size={14} /> Disconnect
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{
+                          border: '1px solid rgba(59, 130, 246, 0.3)',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '24px 20px',
+                          background: 'rgba(59, 130, 246, 0.05)'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                            <Film size={22} color="#60a5fa" />
+                            <div style={{ fontWeight: 700, color: '#fff', fontSize: '1rem' }}>
+                              Connect Video from your 5TB Google Drive Pro
+                            </div>
+                          </div>
+                          <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5 }}>
+                            1. In Google Drive, right-click your MP4 movie and set Share to <strong>"Anyone with the link can view"</strong>.<br />
+                            2. Paste the share link below. WatchBox will stream it directly in full 1080p with zero ads, high-speed buffering, and custom subtitles.
+                          </p>
+                          <div style={{ display: 'flex', gap: 10 }}>
+                            <input
+                              type="text"
+                              className="form-input"
+                              placeholder="https://drive.google.com/file/d/1XyZ.../view?usp=sharing or File ID"
+                              value={gdriveInputUrl}
+                              onChange={(e) => setGdriveInputUrl(e.target.value)}
+                              style={{ flex: 1 }}
+                            />
+                            <button
+                              type="button"
+                              onClick={handleConnectGDrive}
+                              className="nav-btn nav-btn-primary"
+                              style={{ whiteSpace: 'nowrap', padding: '0 20px' }}
+                            >
+                              Connect Video
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : sourceMode === 'b2' ? (
+                    /* MODE: Backblaze B2 Multi-Account Storage */
+                    <div style={{
+                      border: '1px solid rgba(2, 132, 199, 0.35)',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '22px 20px',
+                      background: 'rgba(2, 132, 199, 0.05)'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <HardDrive size={22} color="#38bdf8" />
+                          <div>
+                            <div style={{ fontWeight: 700, color: '#fff', fontSize: '1rem' }}>
+                              Backblaze B2 Multi-Account Storage Stream
+                            </div>
+                            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0 }}>
+                              Zero ads, native 1080p Artplayer with byte-range seeking, 100% free accounts.
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveTab('buckets');
+                            loadBuckets();
+                          }}
+                          className="nav-btn nav-btn-ghost"
+                          style={{ fontSize: '0.78rem', padding: '6px 12px', color: '#38bdf8' }}
+                        >
+                          Manage Buckets &rarr;
+                        </button>
                       </div>
-                    ) : (
-                      <video
-                        src={testStreamUrl}
-                        controls
-                        autoPlay
-                        className="stream-tester-video"
-                      />
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
 
-            {/* Subtitles Management */}
+                      {buckets.length === 0 ? (
+                        <div style={{ padding: 18, background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: 8, color: '#fca5a5', fontSize: '0.88rem' }}>
+                          No storage buckets configured yet. Please open the <strong>"Storage Buckets"</strong> tab to configure your first free Backblaze B2 account!
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+                            <div>
+                              <label className="input-label" style={{ marginBottom: 6 }}>
+                                Select Storage Bucket / Account *
+                              </label>
+                              <select
+                                className="form-input"
+                                value={selectedB2BucketId}
+                                onChange={(e) => {
+                                  const newBucketId = e.target.value;
+                                  setSelectedB2BucketId(newBucketId);
+                                  if (b2FileKey.trim()) {
+                                    const encoded = b2FileKey.trim().split('/').map(encodeURIComponent).join('/');
+                                    setStreamUrl(`/api/stream/b2/${newBucketId}/${encoded}`);
+                                  }
+                                  handleFetchBucketFiles(newBucketId);
+                                }}
+                                style={{ width: '100%', cursor: 'pointer' }}
+                              >
+                                {buckets.map((b) => (
+                                  <option key={b.id} value={b.id}>
+                                    {b.label} ({b.bucket_name} • {b.endpoint}) {b.is_default ? '★ Default' : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="input-label" style={{ marginBottom: 6 }}>
+                                File Key (Filename in Bucket) *
+                              </label>
+                              <div style={{ display: 'flex', gap: 8 }}>
+                                <input
+                                  type="text"
+                                  className="form-input"
+                                  placeholder="e.g. myfile.mp4 or movies/avatar.mp4"
+                                  value={b2FileKey}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setB2FileKey(val);
+                                    if (val.trim()) {
+                                      const encoded = val.trim().split('/').map(encodeURIComponent).join('/');
+                                      setStreamUrl(`/api/stream/b2/${selectedB2BucketId || 'default'}/${encoded}`);
+                                    } else {
+                                      setStreamUrl('');
+                                    }
+                                  }}
+                                  style={{ flex: 1 }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleFetchBucketFiles(selectedB2BucketId)}
+                                  disabled={b2LoadingFiles || !selectedB2BucketId}
+                                  className="nav-btn nav-btn-primary"
+                                  style={{ whiteSpace: 'nowrap', padding: '0 16px', background: '#0284c7' }}
+                                  title="Query bucket files using S3 list"
+                                >
+                                  {b2LoadingFiles ? <RefreshCw size={14} className="spin" /> : <RefreshCw size={14} />}
+                                  <span>{b2LoadingFiles ? 'Checking...' : 'List Files'}</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Quick-clickable detected files pills */}
+                          {b2DiscoveredFiles.length > 0 && (
+                            <div style={{ background: 'rgba(0,0,0,0.25)', padding: '10px 14px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)' }}>
+                              <div style={{ fontSize: '0.78rem', color: '#94a3b8', marginBottom: 6, fontWeight: 600 }}>
+                                Detected files in this bucket (click to select):
+                              </div>
+                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                {b2DiscoveredFiles.map((file) => (
+                                  <button
+                                    key={file}
+                                    type="button"
+                                    onClick={() => {
+                                      setB2FileKey(file);
+                                      const encoded = file.split('/').map(encodeURIComponent).join('/');
+                                      const path = `/api/stream/b2/${selectedB2BucketId || 'default'}/${encoded}`;
+                                      setStreamUrl(path);
+                                      setStatusMessage({ text: `Selected "${file}"! Stream URL set to ${path}`, type: 'success' });
+                                    }}
+                                    style={{
+                                      fontSize: '0.78rem',
+                                      padding: '5px 12px',
+                                      borderRadius: 16,
+                                      background: b2FileKey === file ? '#0284c7' : 'rgba(255,255,255,0.07)',
+                                      color: b2FileKey === file ? '#fff' : '#cbd5e1',
+                                      border: b2FileKey === file ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.12)',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 5,
+                                      transition: '0.15s ease'
+                                    }}
+                                  >
+                                    <Film size={12} />
+                                    <span>{file}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Active Gateway Stream Info */}
+                          {streamUrl && (streamUrl.includes('/api/stream/b2') || streamUrl.includes('backblazeb2.com')) && (
+                            <div style={{
+                              background: 'linear-gradient(135deg, rgba(2, 132, 199, 0.15), rgba(12, 74, 110, 0.25))',
+                              border: '1px solid rgba(56, 189, 248, 0.35)',
+                              borderRadius: 'var(--radius-md)',
+                              padding: '14px 16px',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              flexWrap: 'wrap',
+                              gap: 10
+                            }}>
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#7dd3fc', fontSize: '0.92rem' }}>
+                                  <CheckCircle2 size={18} color="#38bdf8" />
+                                  <span>Connected WatchBox Dynamic B2 Gateway</span>
+                                </div>
+                                <p style={{ fontSize: '0.8rem', color: '#cbd5e1', marginTop: 3, wordBreak: 'break-all' }}>
+                                  Gateway URL: <code>{streamUrl}</code>
+                                </p>
+                              </div>
+                              <div style={{ display: 'flex', gap: 8 }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setTestStreamUrl(streamUrl)}
+                                  className="nav-btn nav-btn-ghost"
+                                  style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+                                >
+                                  <Play size={14} /> Preview Stream
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setStreamUrl(''); setB2FileKey(''); }}
+                                  className="nav-btn nav-btn-ghost"
+                                  style={{ fontSize: '0.8rem', padding: '6px 10px', color: '#f87171' }}
+                                >
+                                  <Trash2 size={14} /> Clear
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* MODE 4: External Stream / Embed Link */
+                    <div>
+                      <input
+                        type="url"
+                        className="form-input"
+                        placeholder="https://ok.ru/video/123456789 or https://vidlink.pro/movie/969681"
+                        value={streamUrl}
+                        onChange={(e) => {
+                          const val = e.target.value.trim();
+                          const okMatch = val.match(/ok\.ru\/(?:video|videoembed)\/(\d+)/);
+                          if (okMatch) {
+                            setStreamUrl(`https://ok.ru/videoembed/${okMatch[1]}`);
+                          } else {
+                            setStreamUrl(e.target.value);
+                          }
+                        }}
+                        required={sourceMode === 'link'}
+                        id="form-stream-url"
+                      />
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
+                          Enter an embed URL or third-party manifest. Viewers will use the Web Embed Player.
+                        </p>
+                        {streamUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setTestStreamUrl(streamUrl)}
+                            style={{ fontSize: '0.78rem', color: 'var(--primary)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer' }}
+                          >
+                            Test Play Link &rarr;
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Inline Video Tester */}
+                  {testStreamUrl && (
+                    <div className="stream-tester-box" style={{ marginTop: 14 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>
+                          {getYouTubeId(testStreamUrl) ? 'Previewing Ad-Free YouTube Cinema Stream:' : 'Previewing Video File:'}
+                        </span>
+                        <button type="button" onClick={() => setTestStreamUrl('')} style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                          Close Preview
+                        </button>
+                      </div>
+                      {getYouTubeId(testStreamUrl) ? (
+                        <div style={{ position: 'relative', width: '100%', aspectRatio: '16/9', borderRadius: 8, overflow: 'hidden', background: '#000' }}>
+                          <iframe
+                            src={`https://www.youtube-nocookie.com/embed/${getYouTubeId(testStreamUrl)}?autoplay=1&rel=0&modestbranding=1&iv_load_policy=3&playsinline=1&fs=1&controls=1&color=white`}
+                            style={{ width: '100%', height: '100%', border: 'none' }}
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+                            allowFullScreen
+                            referrerPolicy="strict-origin-when-cross-origin"
+                            title="Preview"
+                          />
+                        </div>
+                      ) : (
+                        <video
+                          src={testStreamUrl}
+                          controls
+                          autoPlay
+                          className="stream-tester-video"
+                        />
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Subtitles Management */}
               <div className="form-group-full">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 10 }}>
                   <div>
@@ -2477,8 +2904,17 @@ create policy "Allow service role full access"
                     <button
                       type="button"
                       onClick={() => {
-                        subUploadTargetRef.current = null;
-                        subInputRef.current?.click();
+                        const isSeriesMode = contentType === 'series' && episodes.length > 0;
+                        const currentEpIdx = (isSeriesMode && activeSubtitleTab.startsWith('ep-'))
+                          ? parseInt(activeSubtitleTab.replace('ep-', ''), 10)
+                          : null;
+                        if (currentEpIdx !== null && episodes[currentEpIdx]) {
+                          triggerEpisodeSubUpload(currentEpIdx, null);
+                        } else {
+                          subUploadEpisodeRef.current = null;
+                          subUploadTargetRef.current = null;
+                          subInputRef.current?.click();
+                        }
                       }}
                       disabled={uploadLoading}
                       className="nav-btn nav-btn-primary"
@@ -2489,7 +2925,17 @@ create policy "Allow service role full access"
                     </button>
                     <button
                       type="button"
-                      onClick={handleFetchSubtitles}
+                      onClick={() => {
+                        const isSeriesMode = contentType === 'series' && episodes.length > 0;
+                        const currentEpIdx = (isSeriesMode && activeSubtitleTab.startsWith('ep-'))
+                          ? parseInt(activeSubtitleTab.replace('ep-', ''), 10)
+                          : null;
+                        if (currentEpIdx !== null && episodes[currentEpIdx]) {
+                          handleFetchEpisodeSubtitles(currentEpIdx);
+                        } else {
+                          handleFetchSubtitles();
+                        }
+                      }}
                       disabled={subSearching}
                       className="nav-btn nav-btn-primary"
                       style={{ fontSize: '0.78rem', padding: '6px 14px' }}
@@ -2499,7 +2945,17 @@ create policy "Allow service role full access"
                     </button>
                     <button
                       type="button"
-                      onClick={addSubtitleField}
+                      onClick={() => {
+                        const isSeriesMode = contentType === 'series' && episodes.length > 0;
+                        const currentEpIdx = (isSeriesMode && activeSubtitleTab.startsWith('ep-'))
+                          ? parseInt(activeSubtitleTab.replace('ep-', ''), 10)
+                          : null;
+                        if (currentEpIdx !== null && episodes[currentEpIdx]) {
+                          addEpisodeSubtitle(currentEpIdx);
+                        } else {
+                          addSubtitleField();
+                        }
+                      }}
                       className="btn-add-sub"
                       id="add-subtitle-track-btn"
                     >
@@ -2507,6 +2963,84 @@ create policy "Allow service role full access"
                     </button>
                   </div>
                 </div>
+
+                {/* If Series: Show Episode Switcher Tabs */}
+                {contentType === 'series' && episodes.length > 0 && (
+                  <div style={{
+                    display: 'flex',
+                    gap: 8,
+                    marginBottom: 14,
+                    padding: '8px 12px',
+                    background: 'rgba(0, 0, 0, 0.4)',
+                    borderRadius: 8,
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    overflowX: 'auto',
+                    alignItems: 'center'
+                  }}>
+                    <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 600, marginRight: 4, whiteSpace: 'nowrap' }}>
+                      Select Target Episode:
+                    </span>
+                    {episodes.map((ep, idx) => {
+                      const isSelected = activeSubtitleTab === `ep-${idx}`;
+                      const count = ep.subtitles?.length || 0;
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setActiveSubtitleTab(`ep-${idx}`)}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: 6,
+                            fontSize: '0.78rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            border: isSelected ? '1px solid #6366f1' : '1px solid rgba(255,255,255,0.08)',
+                            background: isSelected ? 'rgba(99, 102, 241, 0.35)' : 'rgba(255,255,255,0.04)',
+                            color: isSelected ? '#a5b4fc' : '#cbd5e1',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            whiteSpace: 'nowrap',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <span>📺 Ep {idx + 1}: {ep.title ? (ep.title.length > 18 ? ep.title.slice(0, 18) + '...' : ep.title) : `Episode ${idx + 1}`}</span>
+                          <span style={{
+                            fontSize: '0.7rem',
+                            padding: '1px 6px',
+                            borderRadius: 10,
+                            background: count > 0 ? 'rgba(56, 189, 248, 0.25)' : 'rgba(255,255,255,0.1)',
+                            color: count > 0 ? '#38bdf8' : '#94a3b8',
+                            fontWeight: 700
+                          }}>
+                            {count} {count === 1 ? 'sub' : 'subs'}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() => setActiveSubtitleTab('global')}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: 6,
+                        fontSize: '0.78rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        border: activeSubtitleTab === 'global' ? '1px solid #6366f1' : '1px solid rgba(255,255,255,0.08)',
+                        background: activeSubtitleTab === 'global' ? 'rgba(99, 102, 241, 0.35)' : 'rgba(255,255,255,0.04)',
+                        color: activeSubtitleTab === 'global' ? '#a5b4fc' : '#94a3b8',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        whiteSpace: 'nowrap',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <span>🎬 Fallback / Global ({subtitles.length})</span>
+                    </button>
+                  </div>
+                )}
 
                 <input
                   type="file"
@@ -2517,79 +3051,213 @@ create policy "Allow service role full access"
                     const pickedFile = e.target.files?.[0];
                     if (pickedFile) {
                       const targetIdx = subUploadTargetRef.current;
-                      handleFileUpload(pickedFile, 'subtitles', targetIdx);
+                      const targetEpIdx = subUploadEpisodeRef.current;
+                      handleFileUpload(pickedFile, 'subtitles', targetIdx, targetEpIdx);
                       e.target.value = '';
                       subUploadTargetRef.current = null;
+                      subUploadEpisodeRef.current = null;
                     }
                   }}
                 />
 
-                <div className="subtitle-manager">
-                  {subtitles.map((sub, index) => (
-                    <div key={index} className="sub-item-row">
-                      <input
-                        type="text"
-                        placeholder="Language (e.g. English, Español)"
-                        className="form-input"
-                        style={{ width: 160 }}
-                        value={sub.name}
-                        onChange={(e) => updateSubtitleField(index, 'name', e.target.value)}
-                      />
-                      <input
-                        type="url"
-                        placeholder="Subtitle URL (.vtt / .srt or Supabase link)"
-                        className="form-input"
-                        style={{ flex: 1 }}
-                        value={sub.url}
-                        onChange={(e) => updateSubtitleField(index, 'url', e.target.value)}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          subUploadTargetRef.current = index;
-                          subInputRef.current?.click();
-                        }}
-                        style={{
-                          fontSize: '0.75rem',
-                          padding: '6px 10px',
-                          borderRadius: 6,
-                          background: 'rgba(255,255,255,0.06)',
-                          color: '#38bdf8',
-                          border: '1px solid rgba(56, 189, 248, 0.3)',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 4
-                        }}
-                        title="Upload .vtt or .srt file to Supabase"
-                      >
-                        <Upload size={13} />
-                        <span>Upload</span>
-                      </button>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(sub.isDefault)}
-                          onChange={(e) => updateSubtitleField(index, 'isDefault', e.target.checked)}
-                        />
-                        Default
-                      </label>
-                      {subtitles.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeSubtitleField(index)}
-                          className="btn-remove-sub"
-                          title="Remove Subtitle Track"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                {(() => {
+                  const isSeriesMode = contentType === 'series' && episodes.length > 0;
+                  const currentEpIdx = (isSeriesMode && activeSubtitleTab.startsWith('ep-'))
+                    ? parseInt(activeSubtitleTab.replace('ep-', ''), 10)
+                    : null;
+                  const currentEp = (currentEpIdx !== null && episodes[currentEpIdx])
+                    ? episodes[currentEpIdx]
+                    : null;
+
+                  if (currentEp) {
+                    const epSubs = Array.isArray(currentEp.subtitles) ? currentEp.subtitles : [];
+                    return (
+                      <div className="subtitle-manager">
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, padding: '6px 10px', background: 'rgba(99, 102, 241, 0.12)', borderRadius: 6, border: '1px solid rgba(99, 102, 241, 0.25)' }}>
+                          <span style={{ fontSize: '0.8rem', color: '#a5b4fc', fontWeight: 600 }}>
+                            Editing Subtitles for: Episode {currentEpIdx + 1} - {currentEp.title || `Episode ${currentEpIdx + 1}`}
+                          </span>
+                          <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                            {epSubs.length} track{epSubs.length === 1 ? '' : 's'} assigned (syncs automatically with Ep {currentEpIdx + 1})
+                          </span>
+                        </div>
+
+                        {epSubs.length === 0 ? (
+                          <div style={{ padding: '24px 16px', textAlign: 'center', background: 'rgba(0,0,0,0.25)', borderRadius: 8, border: '1px dashed rgba(255,255,255,0.1)' }}>
+                            <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-secondary)', marginBottom: 12 }}>
+                              No subtitle tracks added for Episode {currentEpIdx + 1} ({currentEp.title || `Episode ${currentEpIdx + 1}`}) yet.
+                            </p>
+                            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                onClick={() => triggerEpisodeSubUpload(currentEpIdx, null)}
+                                className="nav-btn nav-btn-primary"
+                                style={{ fontSize: '0.78rem', padding: '6px 14px', background: '#0284c7' }}
+                              >
+                                <Upload size={13} /> Upload .SRT / .VTT for Ep {currentEpIdx + 1}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleFetchEpisodeSubtitles(currentEpIdx)}
+                                className="nav-btn nav-btn-primary"
+                                style={{ fontSize: '0.78rem', padding: '6px 14px' }}
+                              >
+                                <Wand2 size={13} /> Auto-Fetch Online Subs
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => addEpisodeSubtitle(currentEpIdx)}
+                                className="btn-add-sub"
+                                style={{ fontSize: '0.78rem', padding: '6px 14px' }}
+                              >
+                                <Plus size={13} /> Add Row
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          epSubs.map((sub, index) => (
+                            <div key={index} className="sub-item-row">
+                              <input
+                                type="text"
+                                placeholder="Language (e.g. English, Español)"
+                                className="form-input"
+                                style={{ width: 160 }}
+                                value={sub.name}
+                                onChange={(e) => updateEpisodeSubtitle(currentEpIdx, index, 'name', e.target.value)}
+                              />
+                              <input
+                                type="url"
+                                placeholder="Subtitle URL (.vtt / .srt or Supabase link)"
+                                className="form-input"
+                                style={{ flex: 1 }}
+                                value={sub.url}
+                                onChange={(e) => updateEpisodeSubtitle(currentEpIdx, index, 'url', e.target.value)}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => triggerEpisodeSubUpload(currentEpIdx, index)}
+                                style={{
+                                  fontSize: '0.75rem',
+                                  padding: '6px 10px',
+                                  borderRadius: 6,
+                                  background: 'rgba(255,255,255,0.06)',
+                                  color: '#38bdf8',
+                                  border: '1px solid rgba(56, 189, 248, 0.3)',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 4
+                                }}
+                                title="Upload .vtt or .srt file for this track"
+                              >
+                                <Upload size={13} />
+                                <span>Upload</span>
+                              </button>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(sub.isDefault)}
+                                  onChange={(e) => updateEpisodeSubtitle(currentEpIdx, index, 'isDefault', e.target.checked)}
+                                />
+                                Default
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => removeEpisodeSubtitle(currentEpIdx, index)}
+                                className="btn-remove-sub"
+                                title="Remove Subtitle Track"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          ))
+                        )}
+
+                        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                          Tip: Subtitles configured for Episode {currentEpIdx + 1} will automatically load and sync whenever a viewer plays Episode {currentEpIdx + 1}!
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  // Default / Global Fallback Subtitles Manager
+                  return (
+                    <div className="subtitle-manager">
+                      {contentType === 'series' && (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, padding: '6px 10px', background: 'rgba(255, 255, 255, 0.04)', borderRadius: 6, border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                            Global / Fallback Subtitles (Used as fallback if an episode doesn't have its own custom tracks)
+                          </span>
+                        </div>
                       )}
+                      {subtitles.map((sub, index) => (
+                        <div key={index} className="sub-item-row">
+                          <input
+                            type="text"
+                            placeholder="Language (e.g. English, Español)"
+                            className="form-input"
+                            style={{ width: 160 }}
+                            value={sub.name}
+                            onChange={(e) => updateSubtitleField(index, 'name', e.target.value)}
+                          />
+                          <input
+                            type="url"
+                            placeholder="Subtitle URL (.vtt / .srt or Supabase link)"
+                            className="form-input"
+                            style={{ flex: 1 }}
+                            value={sub.url}
+                            onChange={(e) => updateSubtitleField(index, 'url', e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              subUploadEpisodeRef.current = null;
+                              subUploadTargetRef.current = index;
+                              subInputRef.current?.click();
+                            }}
+                            style={{
+                              fontSize: '0.75rem',
+                              padding: '6px 10px',
+                              borderRadius: 6,
+                              background: 'rgba(255,255,255,0.06)',
+                              color: '#38bdf8',
+                              border: '1px solid rgba(56, 189, 248, 0.3)',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4
+                            }}
+                            title="Upload .vtt or .srt file to Supabase"
+                          >
+                            <Upload size={13} />
+                            <span>Upload</span>
+                          </button>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                            <input
+                              type="checkbox"
+                              checked={Boolean(sub.isDefault)}
+                              onChange={(e) => updateSubtitleField(index, 'isDefault', e.target.checked)}
+                            />
+                            Default
+                          </label>
+                          {subtitles.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => removeSubtitleField(index)}
+                              className="btn-remove-sub"
+                              title="Remove Subtitle Track"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                        Tip: Any third-party subtitle link is automatically proxied with CORS headers so browsers will never block it!
+                      </p>
                     </div>
-                  ))}
-                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                    Tip: Any third-party subtitle link is automatically proxied with CORS headers so browsers will never block it!
-                  </p>
-                </div>
+                  );
+                })()}
               </div>
 
               {/* Poster Image URL */}

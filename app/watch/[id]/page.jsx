@@ -42,6 +42,7 @@ export function getYouTubeId(url) {
 function isHostedVideoFile(url) {
   if (!url || typeof url !== 'string') return false;
   return url.startsWith('/api/stream/b2/') ||
+    url.includes('backblazeb2.com') ||
     url.includes('supabase.co') ||
     url.endsWith('.mp4') ||
     url.endsWith('.webm');
@@ -363,6 +364,15 @@ export default function WatchPage() {
       }
     }
 
+    // Direct Backblaze B2 stream normalization
+    if (streamToPlay && (streamToPlay.includes('backblazeb2.com') || streamToPlay.startsWith('/api/stream/b2'))) {
+      const b2Match = streamToPlay.match(/backblazeb2\.com\/file\/([^/]+)\/([^?#]+)/) ||
+                      streamToPlay.match(/s3\.[^/]+\.backblazeb2\.com\/([^/]+)\/([^?#]+)/);
+      if (b2Match && !streamToPlay.startsWith('/api/stream/b2')) {
+        streamToPlay = `/api/stream/b2/${b2Match[1]}/${b2Match[2]}`;
+      }
+    }
+
     const isClientTokenized = rawCandidate?.includes('token=') && (rawCandidate?.includes('zealotsofzenith') || rawCandidate?.includes('ip_cidr'));
     if (streamToPlay && streamToPlay.includes('.m3u8') && !streamToPlay.startsWith('/api/proxy/stream') && !isClientTokenized) {
       streamToPlay = `/api/proxy/stream?url=${encodeURIComponent(streamToPlay)}`;
@@ -376,7 +386,9 @@ export default function WatchPage() {
         streamToPlay.includes('.webm') ||
         streamToPlay.includes('drive.google.com') ||
         streamToPlay.includes('/api/stream/gdrive') ||
-        streamToPlay.includes('supabase.co')
+        streamToPlay.includes('supabase.co') ||
+        streamToPlay.includes('/api/stream/b2') ||
+        streamToPlay.includes('backblazeb2.com')
       ))
     );
 
