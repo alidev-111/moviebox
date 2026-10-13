@@ -214,6 +214,7 @@ export default function AdminPage() {
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
   const videoInputRef = useRef(null);
+  const videoUploadEpisodeRef = useRef(null);
   const subInputRef = useRef(null);
   const subUploadTargetRef = useRef(null);
   const subUploadEpisodeRef = useRef(null);
@@ -303,8 +304,21 @@ export default function AdminPage() {
       const data = await res.json();
       if (res.ok && data.success && data.publicUrl) {
         if (folder === 'videos') {
-          setStreamUrl(data.publicUrl);
-          setUploadStatus(`✅ Video uploaded successfully! Public link: ${data.publicUrl}`);
+          if (episodeIndex !== null && episodeIndex !== undefined) {
+            setEpisodes((prev) => {
+              const updated = [...prev];
+              if (updated[episodeIndex]) {
+                updated[episodeIndex] = { ...updated[episodeIndex], stream_url: data.publicUrl };
+              }
+              return updated;
+            });
+            setUploadStatus(`✅ Video uploaded and attached to Episode ${episodeIndex + 1}!`);
+            setStatusMessage({ text: `Video uploaded and attached to Episode ${episodeIndex + 1}!`, type: 'success' });
+          } else {
+            setStreamUrl(data.publicUrl);
+            setUploadStatus(`✅ Video uploaded successfully! Public link: ${data.publicUrl}`);
+          }
+          videoUploadEpisodeRef.current = null;
         } else if (folder === 'subtitles') {
           const detectedLang = detectSubLanguage(file.name);
           if (episodeIndex !== null && episodeIndex !== undefined) {
@@ -2078,7 +2092,64 @@ create policy "Allow service role full access"
                                 style={{ flex: 1, minWidth: 200 }}
                               />
 
-                              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                                {b2DiscoveredFiles.length > 0 && (
+                                  <select
+                                    className="form-input"
+                                    style={{
+                                      width: 145,
+                                      fontSize: '0.76rem',
+                                      padding: '5px 8px',
+                                      background: 'rgba(2, 132, 199, 0.15)',
+                                      border: '1px solid rgba(56, 189, 248, 0.35)',
+                                      color: '#38bdf8',
+                                      cursor: 'pointer'
+                                    }}
+                                    value=""
+                                    onChange={(e) => {
+                                      if (e.target.value) {
+                                        const fileKey = e.target.value;
+                                        const encoded = fileKey.split('/').map(encodeURIComponent).join('/');
+                                        const path = `/api/stream/b2/${selectedB2BucketId || 'default'}/${encoded}`;
+                                        updateEpisode(idx, 'stream_url', path);
+                                        setStatusMessage({ text: `Assigned "${fileKey}" to Episode ${idx + 1}!`, type: 'success' });
+                                      }
+                                    }}
+                                    title={`Pick a Backblaze B2 video file for Episode ${idx + 1}`}
+                                  >
+                                    <option value="">📦 B2 Bucket File...</option>
+                                    {b2DiscoveredFiles.map((f) => (
+                                      <option key={f} value={f}>
+                                        {f}
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    videoUploadEpisodeRef.current = idx;
+                                    videoInputRef.current?.click();
+                                  }}
+                                  disabled={uploadLoading}
+                                  className="nav-btn nav-btn-ghost"
+                                  style={{
+                                    padding: '6px 10px',
+                                    fontSize: '0.78rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    color: '#38bdf8',
+                                    border: '1px solid rgba(56, 189, 248, 0.25)',
+                                    cursor: 'pointer'
+                                  }}
+                                  title={`Upload an MP4 or WEBM video file directly for Episode ${idx + 1}`}
+                                >
+                                  <Upload size={13} />
+                                  <span>Upload Video</span>
+                                </button>
+
                                 <button
                                   type="button"
                                   onClick={() => toggleEpisodeSubs(idx)}
@@ -2375,7 +2446,11 @@ create policy "Allow service role full access"
                     style={{ display: 'none' }}
                     accept="video/mp4,video/webm,video/x-matroska"
                     onChange={(e) => {
-                      if (e.target.files?.[0]) handleFileUpload(e.target.files[0], 'videos');
+                      if (e.target.files?.[0]) {
+                        const epIdx = videoUploadEpisodeRef.current;
+                        handleFileUpload(e.target.files[0], 'videos', null, epIdx);
+                        e.target.value = '';
+                      }
                     }}
                   />
 
@@ -2748,6 +2823,16 @@ create policy "Allow service role full access"
                                       const encoded = file.split('/').map(encodeURIComponent).join('/');
                                       const path = `/api/stream/b2/${selectedB2BucketId || 'default'}/${encoded}`;
                                       setStreamUrl(path);
+                                      if (contentType === 'series' && episodes.length > 0) {
+                                        const epTarget = (activeSubtitleTab && activeSubtitleTab.startsWith('ep-'))
+                                          ? parseInt(activeSubtitleTab.replace('ep-', ''), 10)
+                                          : 0;
+                                        if (episodes[epTarget]) {
+                                          updateEpisode(epTarget, 'stream_url', path);
+                                          setStatusMessage({ text: `Selected "${file}" and attached to Episode ${epTarget + 1}!`, type: 'success' });
+                                          return;
+                                        }
+                                      }
                                       setStatusMessage({ text: `Selected "${file}"! Stream URL set to ${path}`, type: 'success' });
                                     }}
                                     style={{

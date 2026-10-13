@@ -339,11 +339,12 @@ export default function WatchPage() {
   useEffect(() => {
     if (!movie) return;
 
-    const activeEp = (movie.type === 'series' || (Array.isArray(movie.episodes) && movie.episodes.length > 0))
+    const isSeries = Boolean(movie.type === 'series' || (Array.isArray(movie.episodes) && movie.episodes.length > 0));
+    const activeEp = isSeries
       ? movie.episodes[currentEpIndex]
       : null;
 
-    const rawCandidate = activeEp?.stream_url || resolvedStream?.streamUrl || movie.stream_url;
+    const rawCandidate = isSeries ? (activeEp?.stream_url || '') : (resolvedStream?.streamUrl || movie.stream_url);
     let streamToPlay = rawCandidate;
 
     // YouTube Unlisted streams are rendered natively via the cinema YouTube embed iframe
@@ -568,11 +569,6 @@ export default function WatchPage() {
       ArtplayerConstructor.DBCLICK_FULLSCREEN = false;
       ArtplayerConstructor.MOBILE_DBCLICK_PLAY = false;
 
-      if (playerInstanceRef.current && playerInstanceRef.current.destroy) {
-        playerInstanceRef.current.destroy(false);
-        playerInstanceRef.current = null;
-      }
-
       const rawSubs = [
         ...(Array.isArray(activeEp?.subtitles) && activeEp.subtitles.length > 0
           ? activeEp.subtitles
@@ -612,6 +608,35 @@ export default function WatchPage() {
           escape: false,
           onVttLoad: (vtt) => cleanSubtitleVtt(vtt, { stripAllTags: subSettings.formatting === 'clean' }),
         };
+      }
+
+      // If existing instance is healthy, switch video stream and subtitles directly
+      if (playerInstanceRef.current && typeof playerInstanceRef.current.switchUrl === 'function' && !playerInstanceRef.current.isDestroy) {
+        const art = playerInstanceRef.current;
+        art.switchUrl(streamToPlay);
+        const epTitle = activeEp ? `${movie.title} • ${activeEp.title || `Episode ${activeEp.episode_number || currentEpIndex + 1}`}` : movie.title;
+        if (art.title) art.title = epTitle;
+
+        if (subtitleConfig && art.subtitle && typeof art.subtitle.switch === 'function') {
+          art.subtitle.switch(subtitleConfig.url, {
+            name: defaultSub?.name || 'Subtitle',
+            type: subtitleConfig.type,
+            escape: false,
+            onVttLoad: subtitleConfig.onVttLoad,
+          });
+        }
+        return;
+      }
+
+      // Clean up previous instance and empty container before initializing
+      if (playerInstanceRef.current) {
+        try {
+          playerInstanceRef.current.destroy(true);
+        } catch {}
+        playerInstanceRef.current = null;
+      }
+      if (artRef.current) {
+        artRef.current.innerHTML = '';
       }
 
       const isHls = streamToPlay?.includes('.m3u8') || streamToPlay?.includes('m3u8');
@@ -846,8 +871,14 @@ export default function WatchPage() {
     }
 
     return () => {
-      if (activeArt && activeArt.destroy) {
-        activeArt.destroy(false);
+      if (playerInstanceRef.current && playerInstanceRef.current.destroy) {
+        try {
+          playerInstanceRef.current.destroy(true);
+        } catch {}
+        playerInstanceRef.current = null;
+      }
+      if (artRef.current) {
+        artRef.current.innerHTML = '';
       }
     };
   }, [scriptsLoaded, movie, activeSubIndex, playerMode, resolvedStream, currentEpIndex]);
@@ -915,7 +946,7 @@ export default function WatchPage() {
     );
   }
 
-  const currentStreamUrl = currentEpisode?.stream_url || resolvedStream?.streamUrl || movie?.stream_url;
+  const currentStreamUrl = isSeries ? (currentEpisode?.stream_url || '') : (resolvedStream?.streamUrl || movie?.stream_url);
   const youtubeId = getYouTubeId(currentStreamUrl);
 
   const isDirectStorage = Boolean(
@@ -1336,15 +1367,16 @@ export default function WatchPage() {
               id="youtube-cinema-player"
             />
           ) : activeMode === 'native' && isDirectStream ? (
-            <div ref={artRef} className="player-container" id="artplayer-container" />
+            <div key={`artplayer-ep-${currentEpIndex}`} ref={artRef} className="player-container" id="artplayer-container" />
           ) : (
             <iframe
+              key={`embed-ep-${currentEpIndex}-${currentStreamUrl}`}
               src={getEmbedUrl()}
               style={{ width: '100%', height: '100%', border: 'none', background: '#000' }}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
               allowFullScreen
               referrerPolicy="no-referrer-when-downgrade"
-              title={movie.title}
+              title={currentEpisode?.title || movie.title}
               id="embed-player-iframe"
             />
           )}
