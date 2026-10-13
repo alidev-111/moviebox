@@ -43,6 +43,15 @@ function getYouTubeId(url) {
   return null;
 }
 
+// File ID from a Google Drive link (or an old /api/stream/gdrive?id= link). Only real Drive links count,
+// so other links that happen to contain "id=" (e.g. Backblaze native URLs with fileId=) are left alone.
+function getGoogleDriveId(url) {
+  if (!url || typeof url !== 'string') return null;
+  if (!url.includes('drive.google.com') && !url.startsWith('/api/stream/gdrive')) return null;
+  const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  return match ? match[1] : null;
+}
+
 export default function AdminPage() {
   const [adminKey, setAdminKey] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -109,14 +118,13 @@ export default function AdminPage() {
       let finalVal = value;
       if (field === 'stream_url' && typeof value === 'string') {
         const trimmed = value.trim();
-        const gdriveMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
-          trimmed.match(/id=([a-zA-Z0-9_-]+)/);
+        const gdriveId = getGoogleDriveId(trimmed);
         const okMatch = trimmed.match(/ok\.ru\/(?:video|videoembed)\/(\d+)/);
         const b2Match = trimmed.match(/backblazeb2\.com\/file\/([^/]+)\/([^?#]+)/) ||
           trimmed.match(/s3\.[^/]+\.backblazeb2\.com\/([^/]+)\/([^?#]+)/);
 
-        if (gdriveMatch && !trimmed.startsWith('/api/stream/gdrive')) {
-          finalVal = `/api/stream/gdrive?id=${gdriveMatch[1]}`;
+        if (gdriveId) {
+          finalVal = `https://drive.google.com/file/d/${gdriveId}/view`;
         } else if (okMatch) {
           finalVal = `https://ok.ru/videoembed/${okMatch[1]}`;
         } else if (b2Match && !trimmed.startsWith('/api/stream/b2')) {
@@ -141,14 +149,13 @@ export default function AdminPage() {
         url = parts[1].trim();
       }
 
-      const gdriveMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
-        url.match(/id=([a-zA-Z0-9_-]+)/);
+      const gdriveId = getGoogleDriveId(url);
       const okMatch = url.match(/ok\.ru\/(?:video|videoembed)\/(\d+)/);
       const b2Match = url.match(/backblazeb2\.com\/file\/([^/]+)\/([^?#]+)/) ||
         url.match(/s3\.[^/]+\.backblazeb2\.com\/([^/]+)\/([^?#]+)/);
 
-      if (gdriveMatch && !url.startsWith('/api/stream/gdrive')) {
-        url = `/api/stream/gdrive?id=${gdriveMatch[1]}`;
+      if (gdriveId) {
+        url = `https://drive.google.com/file/d/${gdriveId}/view`;
       } else if (okMatch) {
         url = `https://ok.ru/videoembed/${okMatch[1]}`;
       } else if (b2Match && !url.startsWith('/api/stream/b2')) {
@@ -257,8 +264,8 @@ export default function AdminPage() {
       gdriveInputUrl.match(/^([a-zA-Z0-9_-]{20,})$/);
     if (match) {
       const fileId = match[1];
-      setStreamUrl(`/api/stream/gdrive?id=${fileId}`);
-      setStatusMessage({ text: 'Connected 5TB Google Drive video stream! 1080p native playback ready.', type: 'success' });
+      setStreamUrl(`https://drive.google.com/file/d/${fileId}/view`);
+      setStatusMessage({ text: "Connected Google Drive video! It will play in Google Drive's own player.", type: 'success' });
     } else {
       setStreamUrl(gdriveInputUrl.trim());
     }
@@ -513,7 +520,7 @@ export default function AdminPage() {
   async function loadMovies() {
     try {
       setLoading(true);
-      const res = await fetch('/api/movies');
+      const res = await fetch('/api/movies?fresh=1', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         setMovies(Array.isArray(data) ? data : []);

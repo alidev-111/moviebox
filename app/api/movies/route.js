@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAllMovies, upsertMovie, getDatabaseStatus } from '@/lib/db';
+import { getAllMovies, upsertMovie, getDatabaseStatus, PUBLIC_CACHE } from '@/lib/db';
 
 export async function GET(request) {
   try {
@@ -15,7 +15,9 @@ export async function GET(request) {
     }
 
     const movies = await getAllMovies();
-    return NextResponse.json(movies);
+    // The admin panel asks with ?fresh=1 so it always sees its own changes immediately
+    const headers = searchParams.has('fresh') ? {} : { 'Cache-Control': PUBLIC_CACHE };
+    return NextResponse.json(movies, { headers });
   } catch (error) {
     console.error('API GET /api/movies error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });

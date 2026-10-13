@@ -46,7 +46,8 @@ export async function GET(request) {
         'Content-Type': 'text/vtt; charset=utf-8',
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'Cache-Control': 'public, max-age=86400',
+        // s-maxage lets Vercel's CDN keep the converted file too, so each subtitle is processed about once a day
+        'Cache-Control': 'public, max-age=86400, s-maxage=86400',
       },
     });
   } catch (error) {

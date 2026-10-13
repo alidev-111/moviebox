@@ -357,12 +357,13 @@ export default function WatchPage() {
       return;
     }
 
-    // Direct Google Drive 5TB stream handling
+    // Google Drive titles play in Google's own preview player (embed), so no video passes through our server
     if (streamToPlay && (streamToPlay.includes('drive.google.com') || streamToPlay.startsWith('/api/stream/gdrive'))) {
-      const gdriveMatch = streamToPlay.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || streamToPlay.match(/id=([a-zA-Z0-9_-]+)/);
-      if (gdriveMatch && !streamToPlay.startsWith('/api/stream/gdrive')) {
-        streamToPlay = `/api/stream/gdrive?id=${gdriveMatch[1]}`;
+      if (playerInstanceRef.current && playerInstanceRef.current.destroy) {
+        playerInstanceRef.current.destroy(false);
+        playerInstanceRef.current = null;
       }
+      return;
     }
 
     // Direct Backblaze B2 stream normalization
@@ -385,8 +386,6 @@ export default function WatchPage() {
         streamToPlay.includes('.m3u8') ||
         streamToPlay.includes('.mp4') ||
         streamToPlay.includes('.webm') ||
-        streamToPlay.includes('drive.google.com') ||
-        streamToPlay.includes('/api/stream/gdrive') ||
         streamToPlay.includes('supabase.co') ||
         streamToPlay.includes('/api/stream/b2') ||
         streamToPlay.includes('backblazeb2.com')
@@ -843,7 +842,7 @@ export default function WatchPage() {
             return;
           }
           if (art && art.notice) {
-            art.notice.show = 'Stream error or Google Drive quota limit. Switching to Embed player...';
+            art.notice.show = 'Stream error. Switching to Embed player...';
           }
           setTimeout(() => {
             setPlayerMode('embed');
@@ -952,8 +951,6 @@ export default function WatchPage() {
   const isDirectStorage = Boolean(
     youtubeId ||
     (currentStreamUrl && (
-      currentStreamUrl.includes('drive.google.com') ||
-      currentStreamUrl.includes('/api/stream/gdrive') ||
       currentStreamUrl.includes('supabase.co') ||
       currentStreamUrl.endsWith('.mp4') ||
       currentStreamUrl.endsWith('.webm')
@@ -1303,10 +1300,10 @@ export default function WatchPage() {
                       transition: '0.15s ease',
                       whiteSpace: 'nowrap'
                     }}
-                    title={isGoogleDrive ? 'Google Drive Web Embed / Mirror Player' : 'Web Embed Player (Multi-server fallback)'}
+                    title={isGoogleDrive ? "Google Drive's own player" : 'Web Embed Player (Multi-server fallback)'}
                     id="btn-embed-player"
                   >
-                    {isGoogleDrive ? '🌐 Drive Mirror' : '🌐 Embed Player'}
+                    {isGoogleDrive ? '🌐 Google Drive Player' : '🌐 Embed Player'}
                   </button>
                 )}
               </div>

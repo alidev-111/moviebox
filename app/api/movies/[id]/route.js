@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getMovieById, upsertMovie, deleteMovieById } from '@/lib/db';
+import { getMovieById, upsertMovie, deleteMovieById, PUBLIC_CACHE } from '@/lib/db';
 
 export async function GET(request, { params }) {
   try {
@@ -10,7 +10,7 @@ export async function GET(request, { params }) {
       return NextResponse.json({ error: 'Movie not found' }, { status: 404 });
     }
 
-    return NextResponse.json(movie);
+    return NextResponse.json(movie, { headers: { 'Cache-Control': PUBLIC_CACHE } });
   } catch (error) {
     console.error(`API GET /api/movies/${id} error:`, error);
     return NextResponse.json({ error: error.message }, { status: 500 });
