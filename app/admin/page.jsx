@@ -27,7 +27,9 @@ import {
   ArrowLeft,
   Upload,
   Tv,
-  ListVideo
+  ListVideo,
+  HardDrive,
+  Server
 } from 'lucide-react';
 
 function getYouTubeId(url) {
@@ -50,7 +52,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState({ text: '', type: '' });
   const [dbStatus, setDbStatus] = useState(null);
-  const [activeTab, setActiveTab] = useState('movies'); // 'movies' | 'form' | 'supabase'
+  const [activeTab, setActiveTab] = useState('movies'); // 'movies' | 'form' | 'supabase' | 'buckets'
 
   // Form State
   const [isEditing, setIsEditing] = useState(false);
@@ -176,10 +178,29 @@ export default function AdminPage() {
   const [importStatus, setImportStatus] = useState('');
   const [showF12Guide, setShowF12Guide] = useState(false);
 
-  // Direct Storage Upload, YouTube & Google Drive State
-  const [sourceMode, setSourceMode] = useState('youtube'); // 'youtube' | 'upload' | 'gdrive' | 'link'
+  // Storage Buckets (Backblaze B2 Multi-Account) State
+  const [buckets, setBuckets] = useState([]);
+  const [loadingBuckets, setLoadingBuckets] = useState(false);
+  const [bucketModalOpen, setBucketModalOpen] = useState(false);
+  const [editingBucket, setEditingBucket] = useState(null);
+  const [bucketLabel, setBucketLabel] = useState('');
+  const [bucketName, setBucketName] = useState('');
+  const [bucketKeyId, setBucketKeyId] = useState('');
+  const [bucketAppKey, setBucketAppKey] = useState('');
+  const [bucketEndpoint, setBucketEndpoint] = useState('s3.us-east-005.backblazeb2.com');
+  const [bucketIsActive, setBucketIsActive] = useState(true);
+  const [bucketIsDefault, setBucketIsDefault] = useState(false);
+  const [bucketTestingId, setBucketTestingId] = useState(null);
+  const [bucketTestResults, setBucketTestResults] = useState({});
+
+  // Direct Storage Upload, YouTube, Google Drive & Backblaze B2 State
+  const [sourceMode, setSourceMode] = useState('youtube'); // 'youtube' | 'upload' | 'gdrive' | 'link' | 'b2'
   const [youtubeInputUrl, setYoutubeInputUrl] = useState('');
   const [gdriveInputUrl, setGdriveInputUrl] = useState('');
+  const [selectedB2BucketId, setSelectedB2BucketId] = useState('');
+  const [b2FileKey, setB2FileKey] = useState('');
+  const [b2DiscoveredFiles, setB2DiscoveredFiles] = useState([]);
+  const [b2LoadingFiles, setB2LoadingFiles] = useState(false);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
   const videoInputRef = useRef(null);
@@ -360,6 +381,7 @@ export default function AdminPage() {
             setAdminKey(savedKey);
             setIsAuthenticated(true);
             loadMovies();
+            loadBuckets();
             checkDbStatus();
             setAuthChecking(false);
             return;
@@ -392,6 +414,7 @@ export default function AdminPage() {
         } catch { }
         setIsAuthenticated(true);
         loadMovies();
+        loadBuckets();
         checkDbStatus();
       } else {
         setLoginError('Invalid secret key. Please check your password.');
@@ -436,6 +459,207 @@ export default function AdminPage() {
       console.error('Failed to load movies:', err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Backblaze B2 Multi-Account Storage Functions
+  async function loadBuckets() {
+    setLoadingBuckets(true);
+    try {
+      const savedKey = localStorage.getItem('watchbox_admin_key') || localStorage.getItem('cinemahub_admin_key') || adminKey;
+      const res = await fetch('/api/buckets', {
+        headers: savedKey ? { Authorization: `Bearer ${savedKey}` } : {},
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data.buckets) ? data.buckets : [];
+        setBuckets(list);
+        if (list.length > 0) {
+          setSelectedB2BucketId((prev) => {
+            if (prev && list.some((b) => b.id === prev)) return prev;
+            const def = list.find((b) => b.is_default) || list[0];
+            return def ? def.id : '';
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load buckets:', err);
+    } finally {
+      setLoadingBuckets(false);
+    }
+  }
+
+  function resetBucketForm() {
+    setEditingBucket(null);
+    setBucketLabel('');
+    setBucketName('');
+    setBucketKeyId('');
+    setBucketAppKey('');
+    setBucketEndpoint('s3.us-east-005.backblazeb2.com');
+    setBucketIsActive(true);
+    setBucketIsDefault(false);
+  }
+
+  function openEditBucketModal(bucket) {
+    setEditingBucket(bucket);
+    setBucketLabel(bucket.label || '');
+    setBucketName(bucket.bucket_name || '');
+    setBucketKeyId(bucket.key_id || '');
+    setBucketAppKey(''); // leave empty to retain existing
+    setBucketEndpoint(bucket.endpoint || 's3.us-east-005.backblazeb2.com');
+    setBucketIsActive(bucket.is_active !== false);
+    setBucketIsDefault(Boolean(bucket.is_default));
+    setBucketModalOpen(true);
+  }
+
+  async function handleSaveBucket(e) {
+    e.preventDefault();
+    if (!bucketName.trim() || !bucketKeyId.trim() || !bucketEndpoint.trim()) {
+      setStatusMessage({ text: 'Please fill in Bucket Name, Key ID, and Endpoint.', type: 'error' });
+      return;
+    }
+    if (!editingBucket && !bucketAppKey.trim()) {
+      setStatusMessage({ text: 'Application Key is required for new buckets.', type: 'error' });
+      return;
+    }
+
+    try {
+      const payload = {
+        id: editingBucket?.id,
+        label: bucketLabel.trim() || bucketName.trim(),
+        bucket_name: bucketName.trim(),
+        key_id: bucketKeyId.trim(),
+        application_key: bucketAppKey.trim(),
+        endpoint: bucketEndpoint.trim(),
+        is_active: bucketIsActive,
+        is_default: bucketIsDefault,
+      };
+
+      const res = await fetch('/api/buckets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminKey}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setStatusMessage({ text: `Storage bucket "${payload.label}" saved successfully!`, type: 'success' });
+        setBucketModalOpen(false);
+        resetBucketForm();
+        loadBuckets();
+      } else {
+        setStatusMessage({ text: data.error || 'Failed to save bucket.', type: 'error' });
+      }
+    } catch (err) {
+      setStatusMessage({ text: `Bucket save error: ${err.message}`, type: 'error' });
+    }
+  }
+
+  async function handleDeleteBucket(id, label) {
+    if (!confirm(`Are you sure you want to remove storage bucket "${label}"?`)) return;
+    try {
+      const res = await fetch(`/api/buckets?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${adminKey}` },
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setStatusMessage({ text: 'Bucket deleted.', type: 'success' });
+        loadBuckets();
+      } else {
+        setStatusMessage({ text: data.error || 'Failed to delete bucket.', type: 'error' });
+      }
+    } catch (err) {
+      setStatusMessage({ text: `Delete error: ${err.message}`, type: 'error' });
+    }
+  }
+
+  async function handleTestBucket(bucket) {
+    const testId = bucket?.id || 'manual';
+    setBucketTestingId(testId);
+    try {
+      const payload = bucket
+        ? { id: bucket.id }
+        : {
+            bucket_name: bucketName.trim(),
+            key_id: bucketKeyId.trim(),
+            application_key: bucketAppKey.trim(),
+            endpoint: bucketEndpoint.trim(),
+          };
+
+      const res = await fetch('/api/buckets/test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminKey}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      setBucketTestResults((prev) => ({
+        ...prev,
+        [testId]: data,
+      }));
+
+      if (data.success) {
+        setStatusMessage({
+          text: `Verified "${bucket?.label || bucketName}"! Found ${data.filesFound?.length || 0} file(s).`,
+          type: 'success',
+        });
+        if (Array.isArray(data.filesFound) && data.filesFound.length > 0) {
+          setB2DiscoveredFiles(data.filesFound);
+        }
+      } else {
+        setStatusMessage({
+          text: `Bucket test failed: ${data.message || data.error}`,
+          type: 'error',
+        });
+      }
+    } catch (err) {
+      setBucketTestResults((prev) => ({
+        ...prev,
+        [testId]: { success: false, message: err.message },
+      }));
+      setStatusMessage({ text: `Test error: ${err.message}`, type: 'error' });
+    } finally {
+      setBucketTestingId(null);
+    }
+  }
+
+  async function handleFetchBucketFiles(bucketId) {
+    if (!bucketId) return;
+    setB2LoadingFiles(true);
+    try {
+      const res = await fetch('/api/buckets/test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminKey}`,
+        },
+        body: JSON.stringify({ id: bucketId }),
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.filesFound)) {
+        setB2DiscoveredFiles(data.filesFound);
+        setStatusMessage({
+          text: `Found ${data.filesFound.length} file(s) in this bucket. Click any file below to select it!`,
+          type: 'success',
+        });
+      } else {
+        setB2DiscoveredFiles([]);
+        setStatusMessage({
+          text: data.message || data.error || 'No files detected in this bucket.',
+          type: data.success ? 'info' : 'error',
+        });
+      }
+    } catch (err) {
+      setStatusMessage({ text: `Failed to list files: ${err.message}`, type: 'error' });
+    } finally {
+      setB2LoadingFiles(false);
     }
   }
 
@@ -485,6 +709,8 @@ export default function AdminPage() {
     setYoutubeInputUrl('');
     setUploadStatus('');
     setGdriveInputUrl('');
+    setB2FileKey('');
+    setB2DiscoveredFiles([]);
     setImportUrl('');
     setImportStatus('');
     setSubSearchId('');
@@ -502,6 +728,12 @@ export default function AdminPage() {
     setTitle(movie.title || '');
     setStreamUrl(movie.stream_url || '');
     const ytId = getYouTubeId(movie.stream_url);
+    const isB2 = Boolean(
+      movie.stream_url && (
+        movie.stream_url.includes('/api/stream/b2') ||
+        movie.stream_url.includes('backblazeb2.com')
+      )
+    );
     const isGDrive = Boolean(
       movie.stream_url && (
         movie.stream_url.includes('drive.google.com') ||
@@ -518,6 +750,17 @@ export default function AdminPage() {
     if (ytId) {
       setSourceMode('youtube');
       setYoutubeInputUrl(movie.stream_url);
+    } else if (isB2) {
+      setSourceMode('b2');
+      const b2Match = movie.stream_url.match(/\/api\/stream\/b2\/([^\/]+)(?:\/(.+))?$/);
+      if (b2Match) {
+        if (b2Match[2]) {
+          setSelectedB2BucketId(b2Match[1]);
+          setB2FileKey(decodeURIComponent(b2Match[2]));
+        } else {
+          setB2FileKey(decodeURIComponent(b2Match[1]));
+        }
+      }
     } else if (isGDrive) {
       setSourceMode('gdrive');
       setGdriveInputUrl(movie.stream_url);
@@ -968,6 +1211,17 @@ create policy "Allow service role full access"
         >
           <Plus size={16} style={{ display: 'inline', marginRight: 6 }} />
           {isEditing ? `Edit: ${title}` : 'Add New Movie'}
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'buckets' ? 'active' : ''}`}
+          onClick={() => {
+            setActiveTab('buckets');
+            loadBuckets();
+          }}
+          id="tab-buckets"
+        >
+          <HardDrive size={16} style={{ display: 'inline', marginRight: 6 }} />
+          Storage Buckets ({buckets.length})
         </button>
         <button
           className={`tab-btn ${activeTab === 'supabase' ? 'active' : ''}`}
@@ -1643,6 +1897,30 @@ create policy "Allow service role full access"
                       </button>
                       <button
                         type="button"
+                        onClick={() => {
+                          setSourceMode('b2');
+                          if (selectedB2BucketId) handleFetchBucketFiles(selectedB2BucketId);
+                        }}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: 6,
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          background: sourceMode === 'b2' ? '#0284c7' : 'transparent',
+                          color: sourceMode === 'b2' ? '#fff' : 'var(--text-secondary)',
+                          border: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          cursor: 'pointer',
+                          transition: '0.15s ease'
+                        }}
+                        id="source-mode-b2-btn"
+                      >
+                        <HardDrive size={14} /> 🪣 Backblaze B2 (Multi-Account)
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => setSourceMode('link')}
                         style={{
                           padding: '6px 14px',
@@ -1921,6 +2199,194 @@ create policy "Allow service role full access"
                             Connect Video
                           </button>
                         </div>
+                      </div>
+                    )}
+                  </div>
+                ) : sourceMode === 'b2' ? (
+                  /* MODE: Backblaze B2 Multi-Account Storage */
+                  <div style={{
+                    border: '1px solid rgba(2, 132, 199, 0.35)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '22px 20px',
+                    background: 'rgba(2, 132, 199, 0.05)'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <HardDrive size={22} color="#38bdf8" />
+                        <div>
+                          <div style={{ fontWeight: 700, color: '#fff', fontSize: '1rem' }}>
+                            Backblaze B2 Multi-Account Storage Stream
+                          </div>
+                          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0 }}>
+                            Zero ads, native 1080p Artplayer with byte-range seeking, 100% free accounts.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveTab('buckets');
+                          loadBuckets();
+                        }}
+                        className="nav-btn nav-btn-ghost"
+                        style={{ fontSize: '0.78rem', padding: '6px 12px', color: '#38bdf8' }}
+                      >
+                        Manage Buckets &rarr;
+                      </button>
+                    </div>
+
+                    {buckets.length === 0 ? (
+                      <div style={{ padding: 18, background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: 8, color: '#fca5a5', fontSize: '0.88rem' }}>
+                        No storage buckets configured yet. Please open the <strong>"Storage Buckets"</strong> tab to configure your first free Backblaze B2 account!
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+                          <div>
+                            <label className="input-label" style={{ marginBottom: 6 }}>
+                              Select Storage Bucket / Account *
+                            </label>
+                            <select
+                              className="form-input"
+                              value={selectedB2BucketId}
+                              onChange={(e) => {
+                                const newBucketId = e.target.value;
+                                setSelectedB2BucketId(newBucketId);
+                                if (b2FileKey.trim()) {
+                                  const encoded = b2FileKey.trim().split('/').map(encodeURIComponent).join('/');
+                                  setStreamUrl(`/api/stream/b2/${newBucketId}/${encoded}`);
+                                }
+                                handleFetchBucketFiles(newBucketId);
+                              }}
+                              style={{ width: '100%', cursor: 'pointer' }}
+                            >
+                              {buckets.map((b) => (
+                                <option key={b.id} value={b.id}>
+                                  {b.label} ({b.bucket_name} • {b.endpoint}) {b.is_default ? '★ Default' : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="input-label" style={{ marginBottom: 6 }}>
+                              File Key (Filename in Bucket) *
+                            </label>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <input
+                                type="text"
+                                className="form-input"
+                                placeholder="e.g. myfile.mp4 or movies/avatar.mp4"
+                                value={b2FileKey}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setB2FileKey(val);
+                                  if (val.trim()) {
+                                    const encoded = val.trim().split('/').map(encodeURIComponent).join('/');
+                                    setStreamUrl(`/api/stream/b2/${selectedB2BucketId || 'default'}/${encoded}`);
+                                  } else {
+                                    setStreamUrl('');
+                                  }
+                                }}
+                                style={{ flex: 1 }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleFetchBucketFiles(selectedB2BucketId)}
+                                disabled={b2LoadingFiles || !selectedB2BucketId}
+                                className="nav-btn nav-btn-primary"
+                                style={{ whiteSpace: 'nowrap', padding: '0 16px', background: '#0284c7' }}
+                                title="Query bucket files using S3 list"
+                              >
+                                {b2LoadingFiles ? <RefreshCw size={14} className="spin" /> : <RefreshCw size={14} />}
+                                <span>{b2LoadingFiles ? 'Checking...' : 'List Files'}</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Quick-clickable detected files pills */}
+                        {b2DiscoveredFiles.length > 0 && (
+                          <div style={{ background: 'rgba(0,0,0,0.25)', padding: '10px 14px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)' }}>
+                            <div style={{ fontSize: '0.78rem', color: '#94a3b8', marginBottom: 6, fontWeight: 600 }}>
+                              Detected files in this bucket (click to select):
+                            </div>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              {b2DiscoveredFiles.map((file) => (
+                                <button
+                                  key={file}
+                                  type="button"
+                                  onClick={() => {
+                                    setB2FileKey(file);
+                                    const encoded = file.split('/').map(encodeURIComponent).join('/');
+                                    const path = `/api/stream/b2/${selectedB2BucketId || 'default'}/${encoded}`;
+                                    setStreamUrl(path);
+                                    setStatusMessage({ text: `Selected "${file}"! Stream URL set to ${path}`, type: 'success' });
+                                  }}
+                                  style={{
+                                    fontSize: '0.78rem',
+                                    padding: '5px 12px',
+                                    borderRadius: 16,
+                                    background: b2FileKey === file ? '#0284c7' : 'rgba(255,255,255,0.07)',
+                                    color: b2FileKey === file ? '#fff' : '#cbd5e1',
+                                    border: b2FileKey === file ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.12)',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 5,
+                                    transition: '0.15s ease'
+                                  }}
+                                >
+                                  <Film size={12} />
+                                  <span>{file}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Active Gateway Stream Info */}
+                        {streamUrl && (streamUrl.includes('/api/stream/b2') || streamUrl.includes('backblazeb2.com')) && (
+                          <div style={{
+                            background: 'linear-gradient(135deg, rgba(2, 132, 199, 0.15), rgba(12, 74, 110, 0.25))',
+                            border: '1px solid rgba(56, 189, 248, 0.35)',
+                            borderRadius: 'var(--radius-md)',
+                            padding: '14px 16px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: 10
+                          }}>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#7dd3fc', fontSize: '0.92rem' }}>
+                                <CheckCircle2 size={18} color="#38bdf8" />
+                                <span>Connected WatchBox Dynamic B2 Gateway</span>
+                              </div>
+                              <p style={{ fontSize: '0.8rem', color: '#cbd5e1', marginTop: 3, wordBreak: 'break-all' }}>
+                                Gateway URL: <code>{streamUrl}</code>
+                              </p>
+                            </div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <button
+                                type="button"
+                                onClick={() => setTestStreamUrl(streamUrl)}
+                                className="nav-btn nav-btn-ghost"
+                                style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+                              >
+                                <Play size={14} /> Preview Stream
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => { setStreamUrl(''); setB2FileKey(''); }}
+                                className="nav-btn nav-btn-ghost"
+                                style={{ fontSize: '0.8rem', padding: '6px 10px', color: '#f87171' }}
+                              >
+                                <Trash2 size={14} /> Clear
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -2250,6 +2716,256 @@ create policy "Allow service role full access"
         </div>
       )}
 
+      {/* TAB: STORAGE BUCKETS (BACKBLAZE B2 MULTI-ACCOUNT) */}
+      {activeTab === 'buckets' && (
+        <div>
+          {/* Header Action Banner */}
+          <div className="recovery-card" style={{ marginBottom: 20 }}>
+            <div className="recovery-info">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                <HardDrive size={22} color="#38bdf8" />
+                <h3 style={{ margin: 0 }}>Backblaze B2 Multi-Account Storage Manager</h3>
+              </div>
+              <p>
+                Connect multiple free Backblaze B2 accounts (10 GB free each). Attach movies and TV series to specific buckets with zero ads, high-speed CDN, and native 1080p Artplayer streaming.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button
+                onClick={loadBuckets}
+                disabled={loadingBuckets}
+                className="nav-btn nav-btn-ghost"
+              >
+                <RefreshCw size={15} className={loadingBuckets ? 'spin' : ''} />
+                <span>Refresh</span>
+              </button>
+              <button
+                onClick={() => {
+                  resetBucketForm();
+                  setBucketModalOpen(true);
+                }}
+                className="nav-btn nav-btn-primary"
+                style={{ background: '#0284c7', borderColor: '#0369a1' }}
+                id="btn-add-storage-bucket"
+              >
+                <Plus size={16} />
+                <span>Add Storage Bucket</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Buckets Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 18, marginBottom: 28 }}>
+            {buckets.length === 0 ? (
+              <div style={{
+                gridColumn: '1 / -1',
+                padding: '48px 24px',
+                textAlign: 'center',
+                background: 'var(--bg-surface)',
+                border: '1px dashed var(--border)',
+                borderRadius: 'var(--radius-lg)'
+              }}>
+                <HardDrive size={40} color="#64748b" style={{ margin: '0 auto 12px' }} />
+                <h4 style={{ color: '#fff', fontSize: '1.1rem', marginBottom: 6 }}>No Storage Buckets Configured</h4>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', maxWidth: 500, margin: '0 auto 18px' }}>
+                  Add your first free Backblaze B2 account to start hosting movie MP4 files with zero ads and unlimited scalability.
+                </p>
+                <button
+                  onClick={() => {
+                    resetBucketForm();
+                    setBucketModalOpen(true);
+                  }}
+                  className="nav-btn nav-btn-primary"
+                  style={{ margin: '0 auto' }}
+                >
+                  <Plus size={16} /> Configure First Bucket
+                </button>
+              </div>
+            ) : (
+              buckets.map((b) => {
+                const testRes = bucketTestResults[b.id];
+                const isTesting = bucketTestingId === b.id;
+                return (
+                  <div
+                    key={b.id}
+                    className="admin-card"
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      border: b.is_default ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid var(--border)',
+                      background: b.is_default ? 'linear-gradient(180deg, rgba(2, 132, 199, 0.08) 0%, var(--bg-surface) 100%)' : 'var(--bg-surface)'
+                    }}
+                  >
+                    <div>
+                      {/* Card Header */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <h4 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: '#fff' }}>
+                              {b.label}
+                            </h4>
+                            {b.is_default && (
+                              <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.4)' }}>
+                                ★ Default
+                              </span>
+                            )}
+                            <span style={{ fontSize: '0.68rem', fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: b.is_active !== false ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.15)', color: b.is_active !== false ? '#86efac' : '#94a3b8' }}>
+                              {b.is_active !== false ? '● Active' : '○ Inactive'}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                            ID: <code>{b.id}</code>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Details Box */}
+                      <div style={{
+                        background: 'rgba(0,0,0,0.3)',
+                        borderRadius: 8,
+                        padding: '12px 14px',
+                        fontSize: '0.82rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 8,
+                        marginBottom: 14
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Bucket Name:</span>
+                          <strong style={{ color: '#fff' }}>{b.bucket_name}</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>S3 Endpoint:</span>
+                          <span style={{ color: '#93c5fd', wordBreak: 'break-all' }}>{b.endpoint}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Key ID:</span>
+                          <code style={{ color: '#cbd5e1' }}>{b.key_id ? `${b.key_id.slice(0, 6)}...${b.key_id.slice(-4)}` : '—'}</code>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Application Key:</span>
+                          <code style={{ color: '#94a3b8' }}>{b.application_key_masked || '••••••••'}</code>
+                        </div>
+                      </div>
+
+                      {/* Test Connection Banner */}
+                      {testRes && (
+                        <div style={{
+                          padding: '10px 12px',
+                          borderRadius: 6,
+                          marginBottom: 14,
+                          fontSize: '0.8rem',
+                          background: testRes.success ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                          border: testRes.success ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                          color: testRes.success ? '#86efac' : '#fca5a5'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+                            {testRes.success ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+                            <span>{testRes.success ? 'Connection Verified & Active' : 'Connection Failed'}</span>
+                          </div>
+                          <div style={{ marginTop: 4, fontSize: '0.76rem', color: testRes.success ? '#bbf7d0' : '#fecaca' }}>
+                            {testRes.message || testRes.error}
+                          </div>
+                          {testRes.filesFound && testRes.filesFound.length > 0 && (
+                            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                              <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginBottom: 4 }}>
+                                Files found ({testRes.filesFound.length}):
+                              </div>
+                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                {testRes.filesFound.map((f) => (
+                                  <span key={f} style={{ fontSize: '0.72rem', padding: '2px 6px', background: 'rgba(255,255,255,0.1)', borderRadius: 4, color: '#fff' }}>
+                                    📄 {f}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Card Actions */}
+                    <div style={{ display: 'flex', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 12, flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => handleTestBucket(b)}
+                        disabled={isTesting}
+                        className="nav-btn nav-btn-primary"
+                        style={{ fontSize: '0.8rem', padding: '6px 12px', background: '#0284c7', borderColor: '#0369a1' }}
+                        title="Run live AWS S3 listing and probe test"
+                      >
+                        {isTesting ? <RefreshCw size={13} className="spin" /> : <CheckCircle2 size={13} />}
+                        <span>{isTesting ? 'Testing...' : '⚡ Test Connection'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => openEditBucketModal(b)}
+                        className="nav-btn nav-btn-ghost"
+                        style={{ fontSize: '0.8rem', padding: '6px 12px' }}
+                      >
+                        <Edit2 size={13} />
+                        <span>Edit</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteBucket(b.id, b.label)}
+                        className="nav-btn nav-btn-ghost"
+                        style={{ fontSize: '0.8rem', padding: '6px 10px', color: '#f87171' }}
+                        title="Delete bucket"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Setup Instructions Card */}
+          <div className="admin-card">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <Server size={22} color="#38bdf8" />
+              <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>
+                How to Create Unlimited Free Backblaze B2 Accounts (10 GB Free Each)
+              </h3>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+              <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                <h5 style={{ color: '#38bdf8', marginBottom: 6 }}>1. Register Free B2 Account</h5>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
+                  Sign up at <a href="https://www.backblaze.com/b2/cloud-storage.html" target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'underline' }}>backblaze.com/b2</a>. Every account receives <strong>10 GB free cloud storage forever</strong> and free egress.
+                </p>
+              </div>
+
+              <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                <h5 style={{ color: '#38bdf8', marginBottom: 6 }}>2. Create a Bucket</h5>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
+                  In your Backblaze dashboard, click <strong>Buckets &rarr; Create a Bucket</strong>. Choose any unique bucket name (e.g. <code>mycinemabox</code>). Set to <strong>Private</strong> (our gateway presigns URLs securely).
+                </p>
+              </div>
+
+              <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                <h5 style={{ color: '#38bdf8', marginBottom: 6 }}>3. Generate Application Key</h5>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
+                  Go to <strong>Application Keys &rarr; Add a New Application Key</strong>. Give it Read and Write access. Copy the <code>keyID</code> and <code>applicationKey</code>. Note the S3 Endpoint under Bucket Details.
+                </p>
+              </div>
+
+              <div style={{ background: 'var(--bg-primary)', padding: 16, borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                <h5 style={{ color: '#38bdf8', marginBottom: 6 }}>4. Connect in WatchBox</h5>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
+                  Click <strong>"Add Storage Bucket"</strong> above and paste your credentials. WatchBox will stream all MP4 videos directly through its dynamic AWS SigV4 signed gateway with byte-range seeking!
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* TAB 3: SUPABASE SETUP GUIDE */}
       {activeTab === 'supabase' && (
         <div className="admin-card">
@@ -2345,6 +3061,140 @@ ADMIN_SECRET_KEY=admin123`}
                 <button
                   type="button"
                   onClick={() => setQuickEditMovie(null)}
+                  className="nav-btn nav-btn-ghost"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* BUCKET ADD / EDIT MODAL */}
+      {bucketModalOpen && (
+        <div className="modal-overlay" onClick={() => setBucketModalOpen(false)}>
+          <div className="modal-card" style={{ maxWidth: 540 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <h3 className="modal-title" style={{ color: '#38bdf8' }}>
+                  {editingBucket ? 'Edit Storage Bucket' : 'Add Backblaze B2 Storage Bucket'}
+                </h3>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                  Configure credentials for a Backblaze B2 free account or custom S3 bucket.
+                </p>
+              </div>
+              <button onClick={() => setBucketModalOpen(false)} className="btn-close-modal">✕</button>
+            </div>
+
+            <form onSubmit={handleSaveBucket} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label className="input-label">Friendly Label * (e.g. Account 1 - Free 10GB)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Account 1 - Action Films"
+                  value={bucketLabel}
+                  onChange={(e) => setBucketLabel(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label className="input-label">Bucket Name *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. alibox"
+                    value={bucketName}
+                    onChange={(e) => setBucketName(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="input-label">S3 Endpoint *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. s3.us-east-005.backblazeb2.com"
+                    value={bucketEndpoint}
+                    onChange={(e) => setBucketEndpoint(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="input-label">keyID (Application Key ID) *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. 005127ef731bad70000000002"
+                  value={bucketKeyId}
+                  onChange={(e) => setBucketKeyId(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="input-label">
+                  applicationKey (Secret Access Key) {editingBucket ? '(Leave blank to keep existing)' : '*'}
+                </label>
+                <input
+                  type="password"
+                  className="form-input"
+                  placeholder={editingBucket ? '•••••••••••••••••••••••••••' : 'e.g. K005wWuDf04WXTidhNgx0k25wJzmGXE'}
+                  value={bucketAppKey}
+                  onChange={(e) => setBucketAppKey(e.target.value)}
+                  required={!editingBucket}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 20, marginTop: 4 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.88rem', color: '#fff', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={bucketIsDefault}
+                    onChange={(e) => setBucketIsDefault(e.target.checked)}
+                  />
+                  <span>Set as Default Bucket</span>
+                </label>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.88rem', color: '#fff', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={bucketIsActive}
+                    onChange={(e) => setBucketIsActive(e.target.checked)}
+                  />
+                  <span>Active</span>
+                </label>
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => handleTestBucket(null)}
+                  disabled={bucketTestingId === 'manual' || !bucketName || !bucketKeyId}
+                  className="nav-btn nav-btn-ghost"
+                  style={{ fontSize: '0.85rem' }}
+                >
+                  {bucketTestingId === 'manual' ? <RefreshCw size={14} className="spin" /> : <CheckCircle2 size={14} />}
+                  <span>Test Credentials</span>
+                </button>
+
+                <button
+                  type="submit"
+                  className="nav-btn nav-btn-primary"
+                  style={{ flex: 1, justifyContent: 'center', background: '#0284c7', borderColor: '#0369a1' }}
+                >
+                  <Save size={16} /> Save Bucket
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setBucketModalOpen(false)}
                   className="nav-btn nav-btn-ghost"
                 >
                   Cancel

@@ -1,26 +1,25 @@
 import { NextResponse } from 'next/server';
-import { isB2Configured, presignB2Url } from '@/lib/b2';
+import { getBucketById, presignB2Url } from '@/lib/b2';
 
 const ROUTE_PREFIX = '/api/stream/b2/';
 
 /**
- * Backblaze B2 Video Stream
- * /api/stream/b2/movies/inception-2010.mp4 -> 302 redirect to a presigned B2 URL.
- * The browser then streams (and seeks with Range requests) straight from Backblaze,
- * so no video bytes pass through this server.
+ * Backblaze B2 Multi-Bucket Dynamic Video Stream
+ * Supports:
+ * 1. /api/stream/b2/[bucketId]/[...fileKey]
+ * 2. /api/stream/b2/[...fileKey] (uses default bucket)
+ * 3. /api/stream/b2/[...fileKey]?bucket=[bucketId]
+ * 
+ * Generates an on-the-fly AWS SigV4 presigned URL using the target bucket's
+ * specific credentials and 302 redirects the browser / ArtPlayer to Backblaze.
+ * ArtPlayer then streams directly with HTTP 206 Range requests without server load.
  */
 export async function GET(request) {
-  if (!isB2Configured) {
-    return NextResponse.json(
-      { error: 'Backblaze B2 is not configured. Set B2_KEY_ID, B2_APPLICATION_KEY, B2_BUCKET and B2_ENDPOINT.' },
-      { status: 503 }
-    );
-  }
+  const { pathname, searchParams } = new URL(request.url);
+  const explicitBucketParam = searchParams.get('bucket');
 
-  const { pathname } = new URL(request.url);
   let segments;
   try {
-    // Backblaze friendly URLs write spaces as "+" (a real "+" is "%2B")
     segments = pathname
       .slice(ROUTE_PREFIX.length)
       .split('/')
@@ -33,10 +32,46 @@ export async function GET(request) {
     return NextResponse.json({ error: 'Invalid file path' }, { status: 400 });
   }
 
-  const signedUrl = presignB2Url(segments.join('/'));
+  try {
+    let targetBucket = null;
+    let fileKey = segments.join('/');
 
-  return NextResponse.redirect(signedUrl, {
-    status: 302,
-    headers: { 'Cache-Control': 'private, max-age=3600' },
-  });
+    if (explicitBucketParam) {
+      targetBucket = await getBucketById(explicitBucketParam);
+    } else if (segments.length >= 2) {
+      // Check if the first path segment is a known bucket ID or bucket name
+      const potentialBucket = await getBucketById(segments[0]);
+      if (potentialBucket && (potentialBucket.id === segments[0] || potentialBucket.bucket_name === segments[0])) {
+        targetBucket = potentialBucket;
+        fileKey = segments.slice(1).join('/');
+      }
+    }
+
+    if (!targetBucket) {
+      targetBucket = await getBucketById(null);
+    }
+
+    if (!targetBucket) {
+      return NextResponse.json(
+        { error: 'No active Backblaze B2 storage bucket found. Please configure a bucket in Admin -> Storage Buckets.' },
+        { status: 503 }
+      );
+    }
+
+    const signedUrl = await presignB2Url(fileKey, 43200, targetBucket);
+
+    return NextResponse.redirect(signedUrl, {
+      status: 302,
+      headers: {
+        'Cache-Control': 'private, max-age=3600',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  } catch (err) {
+    console.error('[B2 Stream Error]:', err);
+    return NextResponse.json(
+      { error: `Failed to generate B2 stream: ${err.message}` },
+      { status: 500 }
+    );
+  }
 }
